@@ -147,9 +147,11 @@ input:focus-visible, select:focus-visible, .icon-btn:focus-visible {
 .folders { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .folder-card { display: flex; flex-direction: column; gap: 6px; }
 .path {
-  font-family: var(--mono); font-size: 12.5px; word-break: break-all;
-  background: var(--surface-2); border-radius: 7px; padding: 8px 10px; min-height: 35px;
+  width: 100%; font-family: var(--mono); font-size: 12.5px; color: var(--text);
+  background: var(--surface-2); border: 1px solid transparent; border-radius: 7px;
+  padding: 8px 10px; min-height: 35px;
 }
+.path:focus { border-color: var(--primary); background: var(--surface); }
 .row-actions { display: flex; gap: 8px; margin-top: 8px; }
 
 .pill {

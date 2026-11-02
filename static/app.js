@@ -187,11 +187,27 @@ document.querySelectorAll("[data-open]").forEach((btn) => {
 });
 
 function renderFolders() {
-  $("path-crm").textContent = state.config.crm_dir || "Not set";
-  $("path-eml").textContent = state.config.eml_dir || "Not set";
+  $("path-crm").value = state.config.crm_dir || "";
+  $("path-eml").value = state.config.eml_dir || "";
   $("watch-toggle").checked = !!state.config.watch;
   $("watch-interval").value = state.config.watch_interval || 30;
   $("autostart-toggle").checked = !!state.config.autostart;
+}
+
+// Typed path fallback: the native picker needs tkinter, so never rely on it alone.
+for (const which of ["crm", "eml"]) {
+  $(`path-${which}`).addEventListener("change", async (event) => {
+    const value = event.target.value.trim();
+    try {
+      await api("/api/config", {
+        method: "POST", body: JSON.stringify({ [`${which}_dir`]: value }),
+      });
+      state.config[`${which}_dir`] = value;
+      await refreshStatus();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
 }
 
 $("watch-toggle").addEventListener("change", async (event) => {
