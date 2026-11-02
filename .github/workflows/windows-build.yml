@@ -1,0 +1,36 @@
+name: Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyinstaller -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Build exe
+        run: pyinstaller CRM_Local.spec --noconfirm --clean
+
+      - name: Build installer
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" CRM_Local.iss'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CRM-Local-Windows
+          path: |
+            dist/CRM_Local.exe
+            dist/CRM_Local-Setup.exe
