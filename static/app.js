@@ -237,7 +237,10 @@ document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     state.silo = tab.dataset.silo;
     state.page = 1;
-    document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("is-active", t === tab));
+    document.querySelectorAll(".tab").forEach((t) => {
+      t.classList.toggle("is-active", t === tab);
+      t.setAttribute("aria-selected", String(t === tab));
+    });
     loadContacts();
   });
 });
