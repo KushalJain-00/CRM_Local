@@ -30,7 +30,13 @@ def test_phone_key_collapses_indian_prefixes():
 
 def test_dedup_index_matches_email_phone_and_name(data_dir):
     con = db.connect("eml")
-    db.insert_eml_contact(con, 1, {
+    email_id = db.insert_email(con, type("Parsed", (), {
+        "subject": "test", "date": "2026-01-01", "sender_name": "test",
+        "sender_email": "test@x.com", "to_emails": "", "cc_emails": "",
+        "bcc_emails": "", "body_text": "body", "has_signature": False,
+    })(), "/tmp/test.eml")
+    con.commit()
+    db.insert_eml_contact(con, email_id, {
         "name": "Vikram Shah", "email_primary": "vikram@x.com",
         "phone_primary": "+91 98123 45678",
     }, "new", "a.eml")

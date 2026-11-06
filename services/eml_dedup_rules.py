@@ -32,3 +32,16 @@ def is_duplicate(email, phone, existing_emails: set[str], existing_phones: set[s
         if n and len(n) >= 3 and n in existing_names:
             return "name"
     return None
+
+
+def phone_key(phone: str | None) -> str | None:
+    """Shared phone normalization (G14): digits-only with India variance collapsed.
+    Strips '91' from 12-digit, leading '0' from 11-digit.
+    Returns None if fewer than 7 digits.
+    """
+    digits = re.sub(r"\D", "", phone or "")
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    if len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    return digits if len(digits) >= 7 else None

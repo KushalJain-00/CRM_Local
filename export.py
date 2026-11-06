@@ -34,9 +34,14 @@ def contacts_to_xlsx(rows: list[dict], sheet_title: str = "Contacts") -> bytes:
         cell.fill = header_fill
         cell.alignment = Alignment(vertical="center")
 
+    def _sanitize(val):
+        if isinstance(val, str) and val and val[0] in ("=", "+", "-", "@"):
+            return "'" + val
+        return val
+
     for r, row in enumerate(rows, start=2):
         for c, (field, _) in enumerate(COLUMNS, start=1):
-            ws.cell(row=r, column=c, value=row.get(field) or "")
+            ws.cell(row=r, column=c, value=_sanitize(row.get(field) or ""))
 
     for col, (field, label) in enumerate(COLUMNS, start=1):
         lengths = [len(label)] + [len(str(row.get(field) or "")) for row in rows[:200]]

@@ -1,217 +1,207 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CRM Local</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <div class="app">
   <aside class="sidebar">
-    <div class="brand">
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" fill="currentColor"/></svg>
-      <span>CRM Local</span>
+    <div class="sidebar-header">
+      <h1>CRM Local</h1>
+      <button class="sidebar-toggle" onclick="toggleSidebar()" aria-label="Toggle sidebar">‹</button>
     </div>
-    <nav>
-      <button class="nav-item is-active" data-view="run">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        Run
-      </button>
-      <button class="nav-item" data-view="contacts">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        Contacts
-      </button>
-      <button class="nav-item" data-view="settings">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-        Settings
-      </button>
+    <nav class="nav" role="navigation" aria-label="Main navigation">
+      <a class="nav-item" data-view="overview" onclick="showView('overview')">Overview</a>
+      <a class="nav-item" data-view="extract" onclick="showView('extract')">Extract</a>
+      <a class="nav-item" data-view="contacts" onclick="showView('contacts')">Contacts</a>
+      <a class="nav-item" data-view="emails" onclick="showView('emails')">Emails</a>
+      <a class="nav-item" data-view="profiles" onclick="showView('profiles')">Customer Profiles</a>
+      <a class="nav-item" data-view="analytics" onclick="showView('analytics')">Analytics</a>
+      <a class="nav-item" data-view="quality" onclick="showView('quality')">Data Quality</a>
+      <a class="nav-item" data-view="history" onclick="showView('history')">History</a>
+      <a class="nav-item" data-view="settings" onclick="showView('settings')">Settings</a>
     </nav>
-    <div class="sidebar-foot">
-      <button id="theme-toggle" class="ghost-btn" title="Toggle theme">
-        <span id="theme-label">Dark</span>
-      </button>
-      <span class="version" id="version">v1.0.0</span>
-    </div>
   </aside>
-
-  <main class="main">
-    <!-- RUN -->
-    <section class="view is-active" id="view-run">
-      <header class="page-head">
-        <div>
-          <h1>Run</h1>
-          <p class="muted">Point at two folders. CRM files and emails stay on this machine.</p>
+  <main class="main" id="main-content">
+    <header class="topbar">
+      <button class="hamburger" onclick="toggleSidebar()" aria-label="Toggle sidebar">☰</button>
+      <span id="topTitle">Overview</span>
+      <div class="topbar-actions">
+        <button class="btn btn-sm" onclick="refreshData()">Refresh</button>
+      </div>
+    </header>
+    <div class="content">
+      <!-- Overview -->
+      <div id="view-overview" class="view active">
+        <h2>Overview</h2>
+        <div class="kpi-grid">
+          <div class="kpi-card"><div class="kpi-label">Total Contacts</div><div class="kpi-value" id="kpi-contacts">0</div></div>
+          <div class="kpi-card"><div class="kpi-label">Total Emails</div><div class="kpi-value" id="kpi-emails">0</div></div>
+          <div class="kpi-card"><div class="kpi-label">Files Processed</div><div class="kpi-value" id="kpi-files">0</div></div>
+          <div class="kpi-card"><div class="kpi-label">New Contacts</div><div class="kpi-value" id="kpi-new">0</div></div>
+          <div class="kpi-card"><div class="kpi-label">Duplicates</div><div class="kpi-value" id="kpi-dupes">0</div></div>
+          <div class="kpi-card"><div class="kpi-label">Data Completeness</div><div class="kpi-value" id="kpi-completeness">0%</div></div>
         </div>
-        <div class="head-actions">
-          <button id="scan-crm" class="btn">Scan CRM</button>
-          <button id="scan-eml" class="btn">Scan EML</button>
-          <button id="scan-all" class="btn btn-primary">
-            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 12a8 8 0 1 1 2.3 5.6M4 20v-5h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Scan now
-          </button>
+        <div class="card">
+          <h3>Recent Activity</h3>
+          <div id="recent-activity" class="activity-list">Loading...</div>
         </div>
-      </header>
-
-      <div class="tiles">
-        <div class="tile"><span class="tile-label">CRM contacts</span><strong id="stat-crm">0</strong></div>
-        <div class="tile"><span class="tile-label">EML contacts</span><strong id="stat-eml">0</strong></div>
-        <div class="tile"><span class="tile-label">Emails stored</span><strong id="stat-emails">0</strong></div>
-        <div class="tile"><span class="tile-label">Waiting to scan</span><strong id="stat-pending">0</strong></div>
       </div>
 
-      <div class="folders">
-        <article class="card folder-card">
-          <div class="card-head">
-            <h2>CRM folder</h2>
-            <span class="pill" id="pending-crm">0 new</span>
+      <!-- Extract -->
+      <div id="view-extract" class="view">
+        <h2>Universal Extract</h2>
+        <div class="drop-zone" id="dropZone" ondragover="event.preventDefault()" ondrop="handleDrop(event)">
+          <p>Drag & drop files here or click to browse</p>
+          <p class="hint">Supports: XLSX, XLS, CSV, PDF, TXT, EML</p>
+          <input type="file" id="fileInput" multiple accept=".xlsx,.xls,.csv,.pdf,.txt,.eml" onchange="handleFiles(this.files)" style="display:none">
+          <button class="btn" onclick="document.getElementById('fileInput').click()">Browse Files</button>
+        </div>
+        <div class="file-queue" id="fileQueue"></div>
+        <div class="actions">
+          <button class="btn btn-primary" onclick="startExtraction()" id="extractBtn" disabled>Extract</button>
+          <button class="btn" onclick="clearQueue()">Clear</button>
+        </div>
+        <div class="progress" id="progress" style="display:none">
+          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+          <span id="progressText">0/0</span>
+        </div>
+        <div class="results" id="extractResults"></div>
+      </div>
+
+      <!-- Contacts -->
+      <div id="view-contacts" class="view">
+        <h2>Contacts</h2>
+        <div class="toolbar">
+          <input type="text" id="contactSearch" placeholder="Search contacts..." oninput="searchContacts()">
+          <select id="contactFilter" onchange="filterContacts()">
+            <option value="">All</option>
+            <option value="has_email">Has Email</option>
+            <option value="has_phone">Has Phone</option>
+            <option value="no_company">No Company</option>
+          </select>
+          <button class="btn btn-sm" onclick="exportContacts()">Export</button>
+        </div>
+        <div class="table-container">
+          <table id="contactsTable">
+            <thead><tr>
+              <th onclick="sortContacts('name')">Name</th>
+              <th onclick="sortContacts('email_primary')">Email</th>
+              <th onclick="sortContacts('phone_primary')">Phone</th>
+              <th onclick="sortContacts('company')">Company</th>
+              <th>Actions</th>
+            </tr></thead>
+            <tbody id="contactsBody"></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="contactsPagination"></div>
+      </div>
+
+      <!-- Emails -->
+      <div id="view-emails" class="view">
+        <h2>Emails</h2>
+        <div class="toolbar">
+          <input type="text" id="emailSearch" placeholder="Search emails..." oninput="searchEmails()">
+        </div>
+        <div class="table-container">
+          <table id="emailsTable">
+            <thead><tr>
+              <th>Subject</th>
+              <th>Sender</th>
+              <th>Date</th>
+              <th>Contacts</th>
+            </tr></thead>
+            <tbody id="emailsBody"></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="emailsPagination"></div>
+      </div>
+
+      <!-- Customer Profiles -->
+      <div id="view-profiles" class="view">
+        <h2>Customer Profiles</h2>
+        <div id="profilesList" class="profiles-list">Loading...</div>
+      </div>
+
+      <!-- Analytics -->
+      <div id="view-analytics" class="view">
+        <h2>Analytics</h2>
+        <div class="analytics-grid">
+          <div class="card"><h3>Geographic Distribution</h3><div id="chart-geo"></div></div>
+          <div class="card"><h3>Field Completeness</h3><div id="chart-completeness"></div></div>
+          <div class="card"><h3>Reachability</h3><div id="chart-reachability"></div></div>
+          <div class="card"><h3>Extraction Sources</h3><div id="chart-sources"></div></div>
+        </div>
+      </div>
+
+      <!-- Data Quality -->
+      <div id="view-quality" class="view">
+        <h2>Data Quality</h2>
+        <div class="quality-grid">
+          <div class="card"><h3>Invalid Emails</h3><div id="quality-invalid-emails"></div></div>
+          <div class="card"><h3>Invalid Phones</h3><div id="quality-invalid-phones"></div></div>
+          <div class="card"><h3>Missing Fields</h3><div id="quality-missing"></div></div>
+          <div class="card"><h3>Duplicates</h3><div id="quality-dupes"></div></div>
+        </div>
+      </div>
+
+      <!-- History -->
+      <div id="view-history" class="view">
+        <h2>Processing History</h2>
+        <div class="table-container">
+          <table id="historyTable">
+            <thead><tr>
+              <th>File</th>
+              <th>Status</th>
+              <th>Contacts</th>
+              <th>Processed At</th>
+            </tr></thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Settings -->
+      <div id="view-settings" class="view">
+        <h2>Settings</h2>
+        <div class="settings-sections">
+          <div class="card">
+            <h3>AI Providers</h3>
+            <div id="providerChain"></div>
+            <button class="btn btn-sm" onclick="addProvider()">Add Provider</button>
           </div>
-          <input class="path" id="path-crm" placeholder="Paste a folder path, or use Choose folder" autocomplete="off" spellcheck="false">
-          <p class="muted small">Spreadsheets and PDFs: .xlsx, .xls, .csv, .pdf</p>
-          <div class="row-actions">
-            <button class="btn" data-pick="crm">Choose folder</button>
-            <button class="btn ghost" data-open="crm">Open</button>
+          <div class="card">
+            <h3>Folders</h3>
+            <label>CRM Directory: <input type="text" id="crmDir" readonly></label>
+            <button class="btn btn-sm" onclick="pickFolder('crm')">Browse</button>
+            <label>EML Directory: <input type="text" id="emlDir" readonly></label>
+            <button class="btn btn-sm" onclick="pickFolder('eml')">Browse</button>
           </div>
-        </article>
-
-        <article class="card folder-card">
-          <div class="card-head">
-            <h2>EML folder</h2>
-            <span class="pill" id="pending-eml">0 new</span>
+          <div class="card">
+            <h3>Appearance</h3>
+            <label>Theme:
+              <select id="themeSelect" onchange="setTheme(this.value)">
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
           </div>
-          <input class="path" id="path-eml" placeholder="Paste a folder path, or use Choose folder" autocomplete="off" spellcheck="false">
-          <p class="muted small">Email files: .eml — read oldest first by the email Date header</p>
-          <div class="row-actions">
-            <button class="btn" data-pick="eml">Choose folder</button>
-            <button class="btn ghost" data-open="eml">Open</button>
+          <div class="card">
+            <h3>Processing</h3>
+            <label>Watch interval (seconds): <input type="number" id="watchInterval" min="10" value="30"></label>
+            <label><input type="checkbox" id="watchEnabled"> Enable folder watching</label>
           </div>
-        </article>
-      </div>
-
-      <article class="card">
-        <div class="card-head">
-          <h2>Watch mode</h2>
-          <label class="switch">
-            <input type="checkbox" id="watch-toggle">
-            <span></span>
-          </label>
-        </div>
-        <p class="muted small">While this app is open, scan the folders every
-          <input type="number" id="watch-interval" class="inline-num" min="10" max="3600" step="10" value="30"> seconds.
-        </p>
-        <label class="check-row">
-          <input type="checkbox" id="autostart-toggle">
-          Start CRM Local when Windows starts
-        </label>
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <h2>Run log</h2>
-          <span class="pill" id="run-status">Idle</span>
-        </div>
-        <div class="run-stats" id="run-stats"></div>
-        <div class="log" id="log" role="log" aria-live="polite"></div>
-      </article>
-    </section>
-
-    <!-- CONTACTS -->
-    <section class="view" id="view-contacts">
-      <header class="page-head">
-        <div>
-          <h1>Contacts</h1>
-          <p class="muted">Every row is stored in the local database.</p>
-        </div>
-        <div class="head-actions">
-          <button id="export-btn" class="btn btn-primary">
-            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 4v10m0 0 4-4m-4 4-4-4M5 19h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Download Excel
-          </button>
-        </div>
-      </header>
-
-      <div class="tabs" role="tablist">
-        <button class="tab is-active" data-silo="crm" role="tab" aria-selected="true">CRM <span class="tab-count" id="tab-crm">0</span></button>
-        <button class="tab" data-silo="eml" role="tab" aria-selected="false">EML <span class="tab-count" id="tab-eml">0</span></button>
-      </div>
-
-      <div class="toolbar">
-        <input type="search" id="search" class="search" placeholder="Search name, email, phone, company…" autocomplete="off">
-        <span class="muted small" id="table-total"></span>
-      </div>
-
-      <div class="table-wrap">
-        <table class="sheet" id="contacts-table">
-          <thead>
-            <tr>
-              <th>Name</th><th>Email</th><th>Phone</th><th>Company</th>
-              <th>Designation</th><th>City</th><th></th>
-            </tr>
-          </thead>
-          <tbody id="contacts-body"></tbody>
-        </table>
-        <div class="empty" id="contacts-empty" hidden>
-          <strong>No contacts yet</strong>
-          <span>Set a folder on the Run page and press Scan now.</span>
+          <div class="actions">
+            <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+          </div>
         </div>
       </div>
-
-      <footer class="pager">
-        <button class="btn ghost" id="prev-page">Previous</button>
-        <span class="muted small" id="page-label">Page 1</span>
-        <button class="btn ghost" id="next-page">Next</button>
-      </footer>
-    </section>
-
-    <!-- SETTINGS -->
-    <section class="view" id="view-settings">
-      <header class="page-head">
-        <div>
-          <h1>Settings</h1>
-          <p class="muted">Cloud providers first. Ollama is optional, at the bottom of the chain.</p>
-        </div>
-        <button class="btn btn-primary" id="save-settings">Save settings</button>
-      </header>
-
-      <article class="card">
-        <div class="card-head">
-          <h2>Extraction providers</h2>
-          <button class="btn ghost" id="add-provider">Add provider</button>
-        </div>
-        <p class="muted small">Tried top to bottom. If one fails, the next takes over. Leave the chain empty to use local pattern matching only.</p>
-        <div id="chain" class="chain"></div>
-      </article>
-
-      <article class="card">
-        <div class="card-head"><h2>Data</h2></div>
-        <dl class="kv">
-          <dt>Settings file</dt><dd id="data-config"></dd>
-          <dt>CRM database</dt><dd id="data-crm"></dd>
-          <dt>EML database</dt><dd id="data-eml"></dd>
-        </dl>
-        <p class="muted small">Everything lives in this folder. Back it up by copying it.</p>
-      </article>
-    </section>
+    </div>
   </main>
 </div>
-
-<!-- Edit drawer -->
-<div class="drawer-scrim" id="drawer-scrim" hidden></div>
-<aside class="drawer" id="drawer" hidden aria-label="Edit contact">
-  <div class="drawer-head">
-    <h2>Edit contact</h2>
-    <button class="icon-btn" id="drawer-close" aria-label="Close">
-      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-    </button>
-  </div>
-  <form id="contact-form" class="drawer-body"></form>
-  <div class="drawer-foot">
-    <button class="btn danger ghost" id="delete-contact">Delete</button>
-    <button class="btn btn-primary" id="save-contact" form="contact-form" type="submit">Save</button>
-  </div>
-</aside>
-
-<div class="toast" id="toast" hidden></div>
 <script src="/static/app.js"></script>
 </body>
 </html>

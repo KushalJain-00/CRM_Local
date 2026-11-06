@@ -262,12 +262,14 @@ def extract_local_fields(parsed: ParsedEml) -> dict:
 def build_llm_prompt(parsed: ParsedEml) -> str:
     zone = parsed.signature_block or parsed.body_text[:2500]
     return (
+        "--- BEGIN UNTRUSTED EMAIL CONTENT ---\n"
         f"Subject: {parsed.subject}\n"
         f"From: {parsed.sender_name} <{parsed.sender_email}>\n"
         f"To: {parsed.receiver_name} <{parsed.receiver_email}>\n"
         f"Date: {parsed.date}\n"
         f"Signature detected: {parsed.has_signature}\n"
-        f"--- SIGNATURE/BODY ---\n{zone}"
+        f"--- SIGNATURE/BODY ---\n{zone}\n"
+        "--- END UNTRUSTED EMAIL CONTENT ---"
     )
 
 def merge_fields(local: dict, ai: dict | None) -> dict:
@@ -275,8 +277,11 @@ def merge_fields(local: dict, ai: dict | None) -> dict:
     for k in FIELD_KEYS:
         av = (ai or {}).get(k)
         lv = local.get(k)
-        if av is not None and str(av).strip() and str(av).strip().lower() != "null":
+        # Local-wins: existing local values are never overwritten (D-007)
+        if lv is not None and str(lv).strip() and str(lv).strip().lower() != "null":
+            out[k] = lv
+        elif av is not None and str(av).strip() and str(av).strip().lower() != "null":
             out[k] = str(av).strip()
         else:
-            out[k] = lv if lv is not None else None
+            out[k] = None
     return out

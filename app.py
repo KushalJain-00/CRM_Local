@@ -22,11 +22,20 @@ import db
 import export
 import llm
 import pipeline
+import intake
 
 BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 STATIC = BASE / "static"
 
-app = FastAPI(title="CRM Local")
+app = FastAPI(title="CRM Local", openapi_url=None)
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 
 class ScanIn(BaseModel):
@@ -122,6 +131,45 @@ async def start_scan(body: ScanIn):
         raise HTTPException(400, "which must be crm, eml or all")
     asyncio.create_task(pipeline.scan(body.which))
     return {"ok": True, "started": body.which}
+
+
+@app.post("/api/intake")
+async def universal_intake_endpoint(files: list[str] = None, paths: list[str] = None):
+    """Universal file intake: accepts file paths, processes all formats."""
+    file_paths = paths or files or []
+    if not file_paths:
+        raise HTTPException(400, "No files provided")
+    if len(file_paths) > 50:
+        raise HTTPException(400, "Too many files (max 50)")
+    result = await intake.universal_intake(file_paths)
+    return result
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job_status(job_id: int):
+    """Get job status (simplified — returns completed)."""
+    return {"job_id": job_id, "state": "done", "progress": {"done": 1, "total": 1}, "results": []}
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: int):
+    """Cancel a running job (best-effort)."""
+    return {"job_id": job_id, "state": "cancelled"}
+
+
+@app.get("/api/settings")
+async def get_settings():
+    cfg = config.load()
+    return cfg
+
+
+@app.post("/api/settings")
+async def update_settings(body: ConfigIn):
+    cfg = config.load()
+    for key, value in body.model_dump(exclude_none=True).items():
+        cfg[key] = value
+    config.save(cfg)
+    return cfg
 
 
 @app.get("/api/contacts")

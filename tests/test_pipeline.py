@@ -50,7 +50,7 @@ def test_scan_processes_eml_and_pushes_to_crm(data_dir, tmp_path, monkeypatch):
     con = db.connect("eml")
     row = con.execute("SELECT * FROM eml_contacts").fetchone()
     assert row["email_key"] == "vikram@example.com"
-    assert row["pushed"] == 1
+    assert row["pushed_to_crm"] == 1
     con.close()
 
 
@@ -80,7 +80,7 @@ def test_eml_processed_in_date_order(data_dir, tmp_path, monkeypatch):
     assert [Path(p).name for p in paths] == ["a-older.eml", "z-newer.eml"]
 
 
-def test_llm_fields_override_local_when_present(data_dir, tmp_path, monkeypatch):
+def test_llm_fields_do_not_override_local(data_dir, tmp_path, monkeypatch):
     _, eml_dir = _setup(tmp_path, monkeypatch)
     (eml_dir / "a.eml").write_text(SAMPLE_EML, "utf-8")
 
@@ -96,8 +96,8 @@ def test_llm_fields_override_local_when_present(data_dir, tmp_path, monkeypatch)
     con = db.connect("eml")
     row = con.execute("SELECT name, city FROM eml_contacts").fetchone()
     con.close()
-    assert row["name"] == "Vikram S Shah"
-    assert row["city"] == "Pune"
+    assert row["name"] == "Vikram Shah"  # local wins (D-007)
+    assert row["city"] == "Mumbai"  # local wins (D-007)
 
 
 def test_missing_folder_is_reported_not_crashed(data_dir, tmp_path, monkeypatch):

@@ -154,23 +154,21 @@ async def _process_eml(path: str, con, index: db.DedupIndex, chain: list) -> Non
         STATE.stats["duplicates"] += 1
         STATE.say("skip", f"{name}: duplicate by {reason} — merged into existing")
         contact_id, _ = db.upsert_contact(
-            con, contact, "eml_contacts", name, use_name=True
+            con, contact, "eml_contacts", source_file=name
         )
     else:
         STATE.stats["new"] += 1
         contact_id = db.insert_eml_contact(con, email_id, contact, "new", name)
     index.add(contact["email_primary"], contact["phone_primary"], contact["name"])
 
-    # Push into the CRM silo, enriching the existing row rather than overwriting.
-    crm = db.connect("crm")
+    # Push into the CRM silo (same unified DB now), enriching the existing row.
     try:
-        _, action = db.upsert_contact(crm, contact, "contacts", name, use_name=False)
-        crm.commit()
+        _, action = db.upsert_contact(con, contact, "contacts", source_file=name)
         if action == "merged":
             STATE.stats["merged"] += 1
         db.mark_pushed(con, contact_id)
-    finally:
-        crm.close()
+    except Exception as e:
+        STATE.say("warn", f"{name}: CRM push failed: {e}")
 
 
 def _process_doc(path: str, con, index: db.DedupIndex) -> None:
@@ -199,7 +197,7 @@ def _process_doc(path: str, con, index: db.DedupIndex) -> None:
             action = "merged"
         else:
             action = "new"
-        _, result = db.upsert_contact(con, contact, "contacts", name, use_name=False)
+        _, result = db.upsert_contact(con, contact, "contacts", source_file=name)
         index.add(contact["email_primary"], contact["phone_primary"], None)
         if result == "new":
             STATE.stats["new"] += 1

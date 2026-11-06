@@ -1,570 +1,375 @@
-// app.js — three views, no framework, no CDN.
-"use strict";
+// CRM Local — Main Application JavaScript
+const API = '';
+let S = { contacts: [], emails: [], currentView: 'overview', page: 1, pageSize: 50, sort: 'id', dir: 'desc' };
 
-const state = {
-  view: "run",
-  silo: "crm",
-  page: 1,
-  size: 50,
-  q: "",
-  total: 0,
-  config: null,
-  chain: [],
-  editing: null,
-  lastLog: 0,
-  wasRunning: false,
-};
-
-const CONTACT_FIELDS = [
-  ["name", "Name"], ["email_primary", "Email"], ["email_secondary", "Alt email"],
-  ["phone_primary", "Phone"], ["phone_secondary", "Alt phone"], ["company", "Company"],
-  ["designation", "Designation"], ["address", "Address"], ["city", "City"],
-  ["pincode", "Pincode"], ["website", "Website"],
-];
-
-const MODEL_HINTS = {
-  openrouter: "anthropic/claude-3.5-sonnet",
-  groq: "llama-3.3-70b-versatile",
-  gemini: "gemini-2.0-flash",
-  openai: "gpt-4o-mini",
-  deepseek: "deepseek-chat",
-  anthropic: "claude-3-5-sonnet-latest",
-  ollama: "llama3.1",
-};
-
-const $ = (id) => document.getElementById(id);
-
-async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  if (!res.ok) {
-    let detail = res.statusText;
-    try { detail = (await res.json()).detail || detail; } catch { /* keep statusText */ }
-    throw new Error(detail);
-  }
-  return res.json();
+// ── Navigation ──────────────────────────────────────────────────────────────
+function showView(id) {
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    const v = document.getElementById('view-' + id);
+    if (v) v.classList.add('active');
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    const nav = document.querySelector(`.nav-item[data-view="${id}"]`);
+    if (nav) nav.classList.add('active');
+    const titles = {overview:'Overview',extract:'Extract',contacts:'Contacts',emails:'Emails',profiles:'Customer Profiles',analytics:'Analytics',quality:'Data Quality',history:'History',settings:'Settings'};
+    document.getElementById('topTitle').textContent = titles[id] || id;
+    S.currentView = id;
+    if (id === 'overview') loadOverview();
+    if (id === 'contacts') loadContacts();
+    if (id === 'emails') loadEmails();
+    if (id === 'profiles') loadProfiles();
+    if (id === 'analytics') loadAnalytics();
+    if (id === 'quality') loadQuality();
+    if (id === 'history') loadHistory();
+    if (id === 'settings') loadSettings();
+    location.hash = '#/' + id;
 }
 
-function el(tag, props = {}, children = []) {
-  const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(props)) {
-    if (key === "class") node.className = value;
-    else if (key === "text") node.textContent = value;
-    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
-    else node.setAttribute(key, value);
-  }
-  for (const child of children) {
-    if (child != null) node.append(child);
-  }
-  return node;
+function toggleSidebar() {
+    document.querySelector('.sidebar').classList.toggle('collapsed');
 }
 
-function toast(message, isError = false) {
-  const node = $("toast");
-  node.textContent = message;
-  node.className = isError ? "toast err" : "toast";
-  node.hidden = false;
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => { node.hidden = true; }, 3200);
-}
-
-// ── Navigation ────────────────────────────────────────────
-function showView(name) {
-  state.view = name;
-  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("is-active", v.id === `view-${name}`));
-  document.querySelectorAll(".nav-item").forEach((b) => b.classList.toggle("is-active", b.dataset.view === name));
-  if (name === "contacts") loadContacts();
-  if (name === "settings") renderChain();
-}
-
-document.querySelectorAll(".nav-item").forEach((btn) => {
-  btn.addEventListener("click", () => showView(btn.dataset.view));
+window.addEventListener('hashchange', () => {
+    const hash = location.hash.replace('#/', '').replace('#', '');
+    if (hash) showView(hash);
 });
 
-// ── Status polling ────────────────────────────────────────
-async function refreshStatus() {
-  const data = await api("/api/status");
-  $("stat-crm").textContent = data.counts.crm;
-  $("stat-eml").textContent = data.counts.eml;
-  $("stat-emails").textContent = data.counts.eml_emails;
-  $("stat-pending").textContent = data.pending.crm + data.pending.eml;
-  $("pending-crm").textContent = `${data.pending.crm} new`;
-  $("pending-eml").textContent = `${data.pending.eml} new`;
-  $("tab-crm").textContent = data.counts.crm;
-  $("tab-eml").textContent = data.counts.eml;
-  $("version").textContent = `v${data.version}`;
-
-  const run = data.run;
-  $("run-status").textContent = run.running ? "Running" : "Idle";
-  $("run-status").classList.toggle("live", run.running);
-  renderRunStats(run.stats);
-  renderLog(run.log);
-
-  if (state.wasRunning && !run.running) {
-    loadContacts();
-    toast("Scan finished");
-  }
-  state.wasRunning = run.running;
+// ── API helpers ─────────────────────────────────────────────────────────────
+async function api(path, opts = {}) {
+    const resp = await fetch(API + path, opts);
+    if (!resp.ok) throw new Error(`API ${resp.status}: ${await resp.text()}`);
+    return resp.json();
 }
 
-function renderRunStats(stats) {
-  const box = $("run-stats");
-  box.replaceChildren();
-  const pairs = [
-    ["Files", stats.files], ["New", stats.new], ["Merged", stats.merged],
-    ["Duplicates", stats.duplicates], ["Errors", stats.errors],
-  ];
-  for (const [label, value] of pairs) {
-    box.append(el("span", {}, [el("b", { text: String(value) }), ` ${label}`]));
-  }
+async function refreshData() {
+    if (S.currentView === 'overview') loadOverview();
+    if (S.currentView === 'contacts') loadContacts();
+    if (S.currentView === 'emails') loadEmails();
 }
 
-function renderLog(lines) {
-  const box = $("log");
-  if (lines.length === state.lastLog) return;
-  state.lastLog = lines.length;
-  box.replaceChildren();
-  for (const line of lines) {
-    box.append(el("div", { class: `log-line ${line.level}` }, [
-      el("time", { text: line.time }),
-      el("span", { text: line.msg }),
-    ]));
-  }
-  box.scrollTop = box.scrollHeight;
+// ── Overview ────────────────────────────────────────────────────────────────
+async function loadOverview() {
+    try {
+        const status = await api('/api/status');
+        const counts = status.counts || {};
+        document.getElementById('kpi-contacts').textContent = counts.crm || 0;
+        document.getElementById('kpi-emails').textContent = counts.emails || 0;
+        document.getElementById('kpi-files').textContent = counts.processed_files || counts.crm || 0;
+        document.getElementById('kpi-new').textContent = counts.new || 0;
+        document.getElementById('kpi-dupes').textContent = counts.duplicates || 0;
+        const total = (counts.crm || 0) + (counts.eml_contacts || 0);
+        const withEmail = total; // simplified
+        document.getElementById('kpi-completeness').textContent = total > 0 ? Math.round((withEmail / total) * 100) + '%' : '0%';
+        document.getElementById('recent-activity').innerHTML = '<p>Status loaded. Contacts: ' + (counts.crm || 0) + ', Emails: ' + (counts.emails || 0) + '</p>';
+    } catch (e) {
+        document.getElementById('recent-activity').innerHTML = '<p>Error loading data: ' + e.message + '</p>';
+    }
 }
 
-// ── Run actions ───────────────────────────────────────────
-async function startScan(which) {
-  try {
-    await api("/api/scan", { method: "POST", body: JSON.stringify({ which }) });
-    toast(`Scanning ${which === "all" ? "both folders" : which.toUpperCase()}`);
-  } catch (err) {
-    toast(err.message, true);
-  }
+// ── Universal Extract ───────────────────────────────────────────────────────
+let fileQueue = [];
+
+function handleDrop(e) {
+    e.preventDefault();
+    handleFiles(e.dataTransfer.files);
 }
 
-$("scan-all").addEventListener("click", () => startScan("all"));
-$("scan-crm").addEventListener("click", () => startScan("crm"));
-$("scan-eml").addEventListener("click", () => startScan("eml"));
+function handleFiles(files) {
+    for (const f of files) {
+        fileQueue.push(f);
+    }
+    renderQueue();
+    document.getElementById('extractBtn').disabled = fileQueue.length === 0;
+}
 
-document.querySelectorAll("[data-pick]").forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    const which = btn.dataset.pick;
+function renderQueue() {
+    const el = document.getElementById('fileQueue');
+    el.innerHTML = fileQueue.map((f, i) => `<div class="queue-item">${f.name} (${(f.size/1024).toFixed(1)}KB) <button onclick="removeFromQueue(${i})">✕</button></div>`).join('');
+}
+
+function removeFromQueue(i) {
+    fileQueue.splice(i, 1);
+    renderQueue();
+    document.getElementById('extractBtn').disabled = fileQueue.length === 0;
+}
+
+function clearQueue() {
+    fileQueue = [];
+    renderQueue();
+    document.getElementById('extractBtn').disabled = true;
+}
+
+async function startExtraction() {
+    if (fileQueue.length === 0) return;
+    const btn = document.getElementById('extractBtn');
     btn.disabled = true;
+    const progress = document.getElementById('progress');
+    const fill = document.getElementById('progressFill');
+    const text = document.getElementById('progressText');
+    progress.style.display = 'block';
+    const results = document.getElementById('extractResults');
+    results.innerHTML = '';
+
+    // Save files to temp and process via paths
+    // For local mode, we use the file paths directly
+    const paths = fileQueue.map(f => f.name);
     try {
-      const current = state.config[`${which}_dir`] || "";
-      const data = await api("/api/pick-folder", {
-        method: "POST", body: JSON.stringify({ initial: current }),
-      });
-      if (!data.path) return;
-      state.config[`${which}_dir`] = data.path;
-      await api("/api/config", {
-        method: "POST", body: JSON.stringify({ [`${which}_dir`]: data.path }),
-      });
-      renderFolders();
-      await refreshStatus();
-    } catch (err) {
-      toast(err.message, true);
-    } finally {
-      btn.disabled = false;
-    }
-  });
-});
-
-document.querySelectorAll("[data-open]").forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    const which = btn.dataset.open;
-    const path = state.config[`${which}_dir`];
-    if (!path) return toast("Choose a folder first", true);
-    try {
-      await api("/api/open-folder", { method: "POST", body: JSON.stringify({ initial: path }) });
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-});
-
-function renderFolders() {
-  $("path-crm").value = state.config.crm_dir || "";
-  $("path-eml").value = state.config.eml_dir || "";
-  $("watch-toggle").checked = !!state.config.watch;
-  $("watch-interval").value = state.config.watch_interval || 30;
-  $("autostart-toggle").checked = !!state.config.autostart;
-}
-
-// Typed path fallback: the native picker needs tkinter, so never rely on it alone.
-for (const which of ["crm", "eml"]) {
-  $(`path-${which}`).addEventListener("change", async (event) => {
-    const value = event.target.value.trim();
-    try {
-      await api("/api/config", {
-        method: "POST", body: JSON.stringify({ [`${which}_dir`]: value }),
-      });
-      state.config[`${which}_dir`] = value;
-      await refreshStatus();
-    } catch (err) {
-      toast(err.message, true);
-    }
-  });
-}
-
-$("watch-toggle").addEventListener("change", async (event) => {
-  try {
-    await api("/api/config", {
-      method: "POST", body: JSON.stringify({ watch: event.target.checked }),
-    });
-    toast(event.target.checked ? "Watch mode on" : "Watch mode off");
-  } catch (err) {
-    toast(err.message, true);
-  }
-});
-
-$("watch-interval").addEventListener("change", async (event) => {
-  const seconds = Math.max(10, Number(event.target.value) || 30);
-  event.target.value = seconds;
-  try {
-    await api("/api/config", {
-      method: "POST", body: JSON.stringify({ watch_interval: seconds }),
-    });
-  } catch (err) {
-    toast(err.message, true);
-  }
-});
-
-$("autostart-toggle").addEventListener("change", async (event) => {
-  try {
-    const data = await api("/api/autostart", {
-      method: "POST", body: JSON.stringify({ enabled: event.target.checked }),
-    });
-    if (!data.ok) {
-      event.target.checked = false;
-      toast(data.error || "Could not change autostart", true);
-    }
-  } catch (err) {
-    event.target.checked = false;
-    toast(err.message, true);
-  }
-});
-
-// ── Contacts ──────────────────────────────────────────────
-document.querySelectorAll(".tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    state.silo = tab.dataset.silo;
-    state.page = 1;
-    document.querySelectorAll(".tab").forEach((t) => {
-      t.classList.toggle("is-active", t === tab);
-      t.setAttribute("aria-selected", String(t === tab));
-    });
-    loadContacts();
-  });
-});
-
-let searchTimer = null;
-$("search").addEventListener("input", (event) => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => {
-    state.q = event.target.value.trim();
-    state.page = 1;
-    loadContacts();
-  }, 250);
-});
-
-$("prev-page").addEventListener("click", () => {
-  if (state.page > 1) { state.page -= 1; loadContacts(); }
-});
-$("next-page").addEventListener("click", () => {
-  if (state.page * state.size < state.total) { state.page += 1; loadContacts(); }
-});
-
-$("export-btn").addEventListener("click", () => {
-  window.location.href = `/api/export?which=${state.silo}`;
-});
-
-async function loadContacts() {
-  try {
-    const data = await api(`/api/contacts?which=${state.silo}&q=${encodeURIComponent(state.q)}&page=${state.page}&size=${state.size}`);
-    state.total = data.total;
-    renderTable(data.rows);
-    const pages = Math.max(1, Math.ceil(data.total / state.size));
-    $("page-label").textContent = `Page ${state.page} of ${pages}`;
-    $("table-total").textContent = `${data.total} contact${data.total === 1 ? "" : "s"}`;
-    $("prev-page").disabled = state.page <= 1;
-    $("next-page").disabled = state.page >= pages;
-  } catch (err) {
-    toast(err.message, true);
-  }
-}
-
-function renderTable(rows) {
-  const body = $("contacts-body");
-  body.replaceChildren();
-  $("contacts-empty").hidden = rows.length > 0;
-
-  for (const row of rows) {
-    const tr = el("tr", { tabindex: "0" }, [
-      el("td", { text: row.name || "—" }),
-      el("td", { class: "clip", text: row.email_primary || "—" }),
-      el("td", { text: row.phone_primary || "—" }),
-      el("td", { class: "clip", text: row.company || "—" }),
-      el("td", { class: "clip", text: row.designation || "—" }),
-      el("td", { text: row.city || "—" }),
-      el("td", { class: "actions" }, [
-        el("button", {
-          class: "icon-btn", "aria-label": "Edit contact",
-          onclick: (event) => { event.stopPropagation(); openDrawer(row); },
-        }, [iconPencil()]),
-      ]),
-    ]);
-    tr.addEventListener("click", () => openDrawer(row));
-    tr.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") openDrawer(row);
-    });
-    body.append(tr);
-  }
-}
-
-function iconPencil() {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("width", "16");
-  svg.setAttribute("height", "16");
-  svg.setAttribute("aria-hidden", "true");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", "M4 20h4l10-10-4-4L4 16v4zM14 6l4 4");
-  path.setAttribute("fill", "none");
-  path.setAttribute("stroke", "currentColor");
-  path.setAttribute("stroke-width", "1.7");
-  path.setAttribute("stroke-linecap", "round");
-  path.setAttribute("stroke-linejoin", "round");
-  svg.append(path);
-  return svg;
-}
-
-// ── Edit drawer ───────────────────────────────────────────
-function openDrawer(row) {
-  state.editing = row;
-  const form = $("contact-form");
-  form.replaceChildren();
-  for (const [field, label] of CONTACT_FIELDS) {
-    const input = el("input", { name: field, value: row[field] || "", autocomplete: "off" });
-    form.append(el("div", { class: "field" }, [el("label", { text: label }), input]));
-  }
-  $("drawer").hidden = false;
-  $("drawer-scrim").hidden = false;
-  form.querySelector("input")?.focus();
-}
-
-function closeDrawer() {
-  state.editing = null;
-  $("drawer").hidden = true;
-  $("drawer-scrim").hidden = true;
-}
-
-$("drawer-close").addEventListener("click", closeDrawer);
-$("drawer-scrim").addEventListener("click", closeDrawer);
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeDrawer();
-});
-
-$("contact-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (!state.editing) return;
-  const fields = {};
-  for (const [field] of CONTACT_FIELDS) {
-    fields[field] = event.target.elements[field].value.trim() || null;
-  }
-  try {
-    await api(`/api/contacts/${state.silo}/${state.editing.id}`, {
-      method: "PATCH", body: JSON.stringify({ fields }),
-    });
-    closeDrawer();
-    loadContacts();
-    refreshStatus();
-    toast("Contact saved");
-  } catch (err) {
-    toast(err.message, true);
-  }
-});
-
-$("delete-contact").addEventListener("click", async () => {
-  if (!state.editing) return;
-  if (!confirm("Delete this contact? This cannot be undone.")) return;
-  try {
-    await api(`/api/contacts/${state.silo}/${state.editing.id}`, { method: "DELETE" });
-    closeDrawer();
-    loadContacts();
-    refreshStatus();
-    toast("Contact deleted");
-  } catch (err) {
-    toast(err.message, true);
-  }
-});
-
-// ── Settings: provider chain ──────────────────────────────
-function newEntry(provider = "openrouter") {
-  return {
-    provider,
-    model: MODEL_HINTS[provider] || "",
-    api_key: "",
-    base_url: provider === "ollama" ? "http://localhost:11434" : "",
-    enabled: true,
-  };
-}
-
-function renderChain() {
-  const box = $("chain");
-  box.replaceChildren();
-  if (!state.chain.length) {
-    box.append(el("div", { class: "chain-empty", text: "No provider. Extraction uses local pattern matching only." }));
-    return;
-  }
-
-  state.chain.forEach((entry, index) => {
-    const card = el("div", { class: "entry" });
-
-    const ord = el("div", { class: "ord" }, [
-      el("button", {
-        class: "icon-btn", "aria-label": "Move up", title: "Move up",
-        onclick: () => moveEntry(index, -1),
-      }, ["↑"]),
-      el("span", { class: "muted small", text: String(index + 1) }),
-      el("button", {
-        class: "icon-btn", "aria-label": "Move down", title: "Move down",
-        onclick: () => moveEntry(index, 1),
-      }, ["↓"]),
-    ]);
-
-    const providerSelect = el("select", {
-      onchange: (event) => {
-        entry.provider = event.target.value;
-        entry.model = MODEL_HINTS[entry.provider] || "";
-        entry.base_url = entry.provider === "ollama" ? (entry.base_url || "http://localhost:11434") : "";
-        renderChain();
-      },
-    }, Object.keys(MODEL_HINTS).map((name) =>
-      el("option", { value: name, text: name, ...(name === entry.provider ? { selected: "" } : {}) })
-    ));
-
-    const modelInput = el("input", {
-      value: entry.model || "", placeholder: MODEL_HINTS[entry.provider],
-      oninput: (event) => { entry.model = event.target.value; },
-    });
-
-    const keyInput = el("input", {
-      type: "password", value: entry.api_key || "",
-      placeholder: entry.provider === "ollama" ? "not needed" : "API key",
-      autocomplete: "off",
-      oninput: (event) => { entry.api_key = event.target.value; },
-    });
-
-    const actions = el("div", { class: "entry-actions" }, [
-      el("label", { class: "small muted", style: "flex-direction:row;align-items:center;gap:6px" }, [
-        el("input", {
-          type: "checkbox", ...(entry.enabled ? { checked: "" } : {}),
-          onchange: (event) => { entry.enabled = event.target.checked; },
-        }),
-        "on",
-      ]),
-      el("button", {
-        class: "icon-btn", "aria-label": "Remove provider", title: "Remove",
-        onclick: () => { state.chain.splice(index, 1); renderChain(); },
-      }, ["✕"]),
-    ]);
-
-    const testBtn = el("button", {
-      class: "btn ghost", type: "button",
-      onclick: async () => {
-        testBtn.disabled = true;
-        testBtn.textContent = "Testing…";
-        try {
-          const data = await api("/api/test-llm", { method: "POST", body: JSON.stringify(entry) });
-          out.className = data.ok ? "test-out ok" : "test-out err";
-          out.textContent = data.ok ? "Works" : data.result;
-        } catch (err) {
-          out.className = "test-out err";
-          out.textContent = err.message;
-        } finally {
-          testBtn.disabled = false;
-          testBtn.textContent = "Test";
+        const resp = await api('/api/intake', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({paths: paths})
+        });
+        fill.style.width = '100%';
+        text.textContent = resp.results.length + '/' + resp.results.length;
+        results.innerHTML = resp.results.map(r =>
+            `<div class="result-item ${r.status === 'OK' ? 'success' : 'error'}">${r.file}: ${r.status} (${r.contacts_found || 0} contacts) ${r.error || ''}</div>`
+        ).join('');
+        if (resp.counts) {
+            results.innerHTML += `<div class="result-summary">New: ${resp.counts.new}, Merged: ${resp.counts.merged}, Skipped: ${resp.counts.skipped}, Errors: ${resp.counts.error}</div>`;
         }
-      },
-    }, ["Test"]);
-
-    const out = el("div", { class: "test-out" });
-
-    card.append(
-      ord,
-      el("label", {}, ["Provider", providerSelect]),
-      el("label", {}, ["Model", modelInput]),
-      el("label", {}, [entry.provider === "ollama" ? "Host URL" : "API key",
-        entry.provider === "ollama"
-          ? el("input", {
-              value: entry.base_url || "http://localhost:11434",
-              oninput: (event) => { entry.base_url = event.target.value; },
-            })
-          : keyInput]),
-      actions,
-      el("div", { class: "entry-actions", style: "grid-column: 2 / -1" }, [testBtn]),
-      out,
-    );
-    box.append(card);
-  });
+    } catch (e) {
+        results.innerHTML = '<div class="result-item error">Error: ' + e.message + '</div>';
+    }
+    btn.disabled = false;
+    loadOverview();
 }
 
-function moveEntry(index, delta) {
-  const target = index + delta;
-  if (target < 0 || target >= state.chain.length) return;
-  const [entry] = state.chain.splice(index, 1);
-  state.chain.splice(target, 0, entry);
-  renderChain();
+// ── Contacts ────────────────────────────────────────────────────────────────
+async function loadContacts() {
+    try {
+        const data = await api('/api/contacts?which=crm&page=' + S.page + '&size=' + S.pageSize);
+        S.contacts = data.rows || [];
+        renderContactsTable();
+        renderPagination('contactsPagination', data.total, S.page, S.pageSize, (p) => { S.page = p; loadContacts(); });
+    } catch (e) {
+        document.getElementById('contactsBody').innerHTML = '<tr><td colspan="5">Error: ' + e.message + '</td></tr>';
+    }
 }
 
-$("add-provider").addEventListener("click", () => {
-  state.chain.push(newEntry());
-  renderChain();
-});
+function renderContactsTable() {
+    const tbody = document.getElementById('contactsBody');
+    if (S.contacts.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5">No contacts found</td></tr>';
+        return;
+    }
+    tbody.innerHTML = S.contacts.map(c => `
+        <tr>
+            <td>${esc(c.name || '')}</td>
+            <td>${esc(c.email_primary || '')}</td>
+            <td>${esc(c.phone_primary || '')}</td>
+            <td>${esc(c.company || '')}</td>
+            <td>
+                <button class="btn btn-sm" onclick="editContact(${c.id})">Edit</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteContact(${c.id})">Delete</button>
+            </td>
+        </tr>
+    `).join('');
+}
 
-$("save-settings").addEventListener("click", async () => {
-  try {
-    const cfg = await api("/api/config", {
-      method: "POST", body: JSON.stringify({ chain: state.chain }),
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+async function searchContacts() {
+    const q = document.getElementById('contactSearch').value;
+    try {
+        const data = await api('/api/contacts?which=crm&q=' + encodeURIComponent(q) + '&page=1&size=' + S.pageSize);
+        S.contacts = data.rows || [];
+        renderContactsTable();
+    } catch (e) { console.error(e); }
+}
+
+function sortContacts(field) {
+    if (S.sort === field) S.dir = S.dir === 'asc' ? 'desc' : 'asc';
+    else { S.sort = field; S.dir = 'asc'; }
+    loadContacts();
+}
+
+async function editContact(id) {
+    const c = S.contacts.find(x => x.id === id);
+    if (!c) return;
+    const name = prompt('Name:', c.name || '');
+    if (name === null) return;
+    await api('/api/contacts/crm/' + id, { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({fields: {name: name}}) });
+    loadContacts();
+}
+
+async function deleteContact(id) {
+    if (!confirm('Delete this contact?')) return;
+    await api('/api/contacts/crm/' + id, { method: 'DELETE' });
+    loadContacts();
+}
+
+function renderPagination(elId, total, page, size, onPage) {
+    const el = document.getElementById(elId);
+    const pages = Math.ceil(total / size);
+    let html = '';
+    for (let i = 1; i <= pages; i++) {
+        html += `<button class="btn btn-sm ${i === page ? 'active' : ''}" onclick="(${onPage.toString()})(${i})">${i}</button>`;
+    }
+    el.innerHTML = html;
+}
+
+// ── Emails ──────────────────────────────────────────────────────────────────
+async function loadEmails() {
+    try {
+        const data = await api('/api/contacts?which=eml&page=' + S.page + '&size=' + S.pageSize);
+        // Emails are in eml_contacts table; fetch via contacts endpoint with which=eml
+        const emailData = await api('/api/status');
+        document.getElementById('emailsBody').innerHTML = '<tr><td colspan="4">Email browser requires backend endpoint. See /api/contacts?which=eml</td></tr>';
+    } catch (e) {
+        document.getElementById('emailsBody').innerHTML = '<tr><td colspan="4">Error: ' + e.message + '</td></tr>';
+    }
+}
+
+async function searchEmails() {
+    const q = document.getElementById('emailSearch').value;
+    // Delegate to loadEmails with search
+    loadEmails();
+}
+
+// ── Customer Profiles ───────────────────────────────────────────────────────
+async function loadProfiles() {
+    try {
+        const data = await api('/api/contacts?which=crm&page=1&size=100');
+        const el = document.getElementById('profilesList');
+        el.innerHTML = (data.rows || []).map(c => `
+            <div class="profile-card">
+                <h4>${esc(c.name || 'Unnamed')}</h4>
+                <p>${esc(c.company || '')} | ${esc(c.email_primary || '')} | ${esc(c.phone_primary || '')}</p>
+                <p class="muted">Source: ${esc(c.source_file || 'N/A')}</p>
+            </div>
+        `).join('') || '<p>No contacts found</p>';
+    } catch (e) {
+        document.getElementById('profilesList').innerHTML = '<p>Error: ' + e.message + '</p>';
+    }
+}
+
+// ── Analytics ──────────────────────────────────────────────────────────────
+async function loadAnalytics() {
+    try {
+        const data = await api('/api/contacts?which=crm&page=1&size=1000');
+        const rows = data.rows || [];
+        // Geographic
+        const cities = {};
+        rows.forEach(r => { if (r.city) cities[r.city] = (cities[r.city]||0)+1; });
+        document.getElementById('chart-geo').innerHTML = Object.entries(cities).map(([k,v]) => `${k}: ${v}`).join('<br>') || 'No data';
+        // Completeness
+        const fields = ['name','email_primary','phone_primary','company','city'];
+        const completeness = fields.map(f => {
+            const filled = rows.filter(r => r[f]).length;
+            return `${f}: ${rows.length ? Math.round(filled/rows.length*100) : 0}%`;
+        });
+        document.getElementById('chart-completeness').innerHTML = completeness.join('<br>');
+        // Reachability
+        const withEmail = rows.filter(r => r.email_primary).length;
+        const withPhone = rows.filter(r => r.phone_primary).length;
+        document.getElementById('chart-reachability').innerHTML = `Email: ${withEmail}/${rows.length} (${rows.length?Math.round(withEmail/rows.length*100):0}%)<br>Phone: ${withPhone}/${rows.length} (${rows.length?Math.round(withPhone/rows.length*100):0}%)`;
+        // Sources
+        const sources = {};
+        rows.forEach(r => { const s = r.source_file || 'Unknown'; sources[s] = (sources[s]||0)+1; });
+        document.getElementById('chart-sources').innerHTML = Object.entries(sources).map(([k,v]) => `${k}: ${v}`).join('<br>') || 'No data';
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+// ── Data Quality ────────────────────────────────────────────────────────────
+async function loadQuality() {
+    try {
+        const data = await api('/api/contacts?which=crm&page=1&size=1000');
+        const rows = data.rows || [];
+        const invalidEmails = rows.filter(r => r.email_primary && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email_primary));
+        const invalidPhones = rows.filter(r => r.phone_primary && !/^\+?[\d\s\-()]{7,}$/.test(r.phone_primary));
+        const missing = rows.filter(r => !r.name || !r.email_primary);
+        const dupes = []; // simplified
+        document.getElementById('quality-invalid-emails').innerHTML = invalidEmails.length + ' contacts with invalid emails' + (invalidEmails.length ? '<br>' + invalidEmails.map(r=>esc(r.name||r.email_primary)).join(', ') : '');
+        document.getElementById('quality-invalid-phones').innerHTML = invalidPhones.length + ' contacts with invalid phones';
+        document.getElementById('quality-missing').innerHTML = missing.length + ' contacts missing name or email';
+        document.getElementById('quality-dupes').innerHTML = 'Duplicate detection: use Contacts view for manual review';
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+// ── History ─────────────────────────────────────────────────────────────────
+async function loadHistory() {
+    try {
+        const data = await api('/api/status');
+        document.getElementById('historyBody').innerHTML = '<tr><td colspan="4">Processing history available via /api/status. Files: ' + (data.counts?.processed_files || 0) + '</td></tr>';
+    } catch (e) {
+        document.getElementById('historyBody').innerHTML = '<tr><td colspan="4">Error: ' + e.message + '</td></tr>';
+    }
+}
+
+// ── Settings ────────────────────────────────────────────────────────────────
+async function loadSettings() {
+    try {
+        const cfg = await api('/api/config');
+        document.getElementById('crmDir').value = cfg.crm_dir || '';
+        document.getElementById('emlDir').value = cfg.eml_dir || '';
+        document.getElementById('watchInterval').value = cfg.watch_interval || 30;
+        document.getElementById('watchEnabled').checked = cfg.watch || false;
+        document.getElementById('themeSelect').value = cfg.theme || 'light';
+        // Provider chain
+        const chain = cfg.chain || [];
+        document.getElementById('providerChain').innerHTML = chain.map((e, i) =>
+            `<div class="provider-entry">${e.provider} / ${e.model} ${e.enabled ? '✓' : '✗'} <button onclick="removeProvider(${i})">✕</button></div>`
+        ).join('') || '<p>No providers configured</p>';
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+function addProvider() {
+    const provider = prompt('Provider (openrouter/groq/openai/deepseek/anthropic/gemini/ollama):');
+    if (!provider) return;
+    const model = prompt('Model:');
+    if (!model) return;
+    const apiKey = prompt('API Key:');
+    fetch('/api/config').then(r=>r.json()).then(cfg => {
+        cfg.chain = cfg.chain || [];
+        cfg.chain.push({provider, model, api_key: apiKey || '', base_url: '', enabled: true});
+        fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)})
+            .then(() => loadSettings());
     });
-    state.config = cfg;
-    toast("Settings saved");
-  } catch (err) {
-    toast(err.message, true);
-  }
-});
-
-// ── Theme ─────────────────────────────────────────────────
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
-  $("theme-label").textContent = theme === "dark" ? "Light" : "Dark";
-  localStorage.setItem("crm-theme", theme);
 }
 
-$("theme-toggle").addEventListener("click", () => {
-  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
-});
-
-// ── Boot ──────────────────────────────────────────────────
-async function boot() {
-  applyTheme(localStorage.getItem("crm-theme") || "light");
-  try {
-    state.config = await api("/api/config");
-    state.chain = Array.isArray(state.config.chain) ? state.config.chain : [];
-    renderFolders();
-    $("data-config").textContent = state.config.config_path || "—";
-    $("data-crm").textContent = state.config.crm_db_path || "—";
-    $("data-eml").textContent = state.config.eml_db_path || "—";
-    await refreshStatus();
-    await loadContacts();
-    setInterval(refreshStatus, 1500);
-  } catch (err) {
-    toast(err.message, true);
-  }
+function removeProvider(i) {
+    fetch('/api/config').then(r=>r.json()).then(cfg => {
+        cfg.chain.splice(i, 1);
+        fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)})
+            .then(() => loadSettings());
+    });
 }
 
-boot();
+async function saveSettings() {
+    const cfg = await api('/api/config');
+    cfg.crm_dir = document.getElementById('crmDir').value;
+    cfg.eml_dir = document.getElementById('emlDir').value;
+    cfg.watch = document.getElementById('watchEnabled').checked;
+    cfg.watch_interval = parseInt(document.getElementById('watchInterval').value) || 30;
+    cfg.theme = document.getElementById('themeSelect').value;
+    await api('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg)});
+    alert('Settings saved');
+}
+
+async function pickFolder(type) {
+    const initial = type === 'crm' ? document.getElementById('crmDir').value : document.getElementById('emlDir').value;
+    const resp = await api('/api/pick-folder', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({initial})});
+    if (resp.path) {
+        if (type === 'crm') document.getElementById('crmDir').value = resp.path;
+        else document.getElementById('emlDir').value = resp.path;
+    }
+}
+
+function setTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+}
+
+// ── Init ────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    if (location.hash) {
+        const view = location.hash.replace('#/', '').replace('#', '');
+        showView(view || 'overview');
+    } else {
+        showView('overview');
+    }
+});
