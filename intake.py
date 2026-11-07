@@ -7,7 +7,9 @@ import logging
 from services.adapters import get_adapter, NormalizedContact, ExtractionResult
 from services.eml_processor import parse_eml_bytes, extract_local_fields, build_llm_prompt, merge_fields
 from services.eml_dedup_rules import is_duplicate, normalize_email, normalize_phone, phone_key
-from llm import parse_json as parse_llm_json
+# `llm` must be importable as a module: line 78 calls llm.extract(...) and the
+# old `from llm import parse_json as parse_llm_json` (unused) left `llm` unbound.
+import llm
 
 logger = logging.getLogger(__name__)
 

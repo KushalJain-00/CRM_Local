@@ -18,6 +18,12 @@ from services.eml_processor import (
 CRM_EXTS = (".xlsx", ".xls", ".csv", ".pdf")
 EML_EXTS = (".eml",)
 LOW_CONFIDENCE = 0.5
+# SEC-07 (D-028): the scan path had no limits at all. shortcut: files deeper
+# than MAX_SCAN_DEPTH or beyond MAX_SCAN_FILES are silently skipped — raise
+# the caps if a legitimate archive needs more.
+MAX_SCAN_DEPTH = 12
+MAX_SCAN_FILES = 20_000
+MAX_SCAN_SIZE = 10 * 1024 * 1024  # matches intake.MAX_FILE_SIZE
 
 
 class RunState:
@@ -56,12 +62,19 @@ def _files(directory: str, exts: tuple[str, ...]) -> list[str]:
     if not directory or not os.path.isdir(directory):
         return []
     found = []
+    base_depth = directory.rstrip(os.sep).count(os.sep)
     for root, dirs, names in os.walk(directory):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        depth = root.count(os.sep) - base_depth
+        if depth < MAX_SCAN_DEPTH:
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+        else:
+            dirs[:] = []
         for name in names:
             if name.startswith("~$") or name.startswith("."):
                 continue
             if name.lower().endswith(exts):
+                if len(found) >= MAX_SCAN_FILES:
+                    return found
                 found.append(os.path.join(root, name))
     return found
 
@@ -97,6 +110,15 @@ def _pending(directory: str, which: str, exts: tuple[str, ...]) -> list[str]:
             try:
                 st = os.stat(path)
             except OSError:
+                continue
+            if st.st_size > MAX_SCAN_SIZE:
+                # SEC-07: skip + record as error so oversized files are never
+                # read whole (OOM) and stop being counted as pending.
+                db.mark_processed(
+                    con, path, st.st_size, st.st_mtime, "error",
+                    f"file exceeds {MAX_SCAN_SIZE // (1024 * 1024)}MB scan size cap",
+                )
+                con.commit()
                 continue
             if not db.is_processed(con, path, st.st_size, st.st_mtime):
                 out.append(path)

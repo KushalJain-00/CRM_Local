@@ -53,8 +53,28 @@ def load() -> dict:
     return cfg
 
 
+def _private(p: Path) -> None:
+    # SEC-09: config.json holds provider keys — owner-only on POSIX.
+    # Windows inherits the profile ACL; os.chmod there is a no-op for modes.
+    if os.name == "nt":
+        return
+    try:
+        os.chmod(p, 0o600)
+    except OSError:
+        pass
+
+
+def lock_down() -> None:
+    """Force config.json to 0600 on app startup (SEC-09)."""
+    p = config_path()
+    if p.exists():
+        _private(p)
+
+
 def save(cfg: dict) -> None:
     p = config_path()
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(cfg, indent=2), "utf-8")
+    _private(tmp)  # chmod before replace so the file is never world-readable
     os.replace(tmp, p)
+    _private(p)

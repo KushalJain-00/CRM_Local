@@ -10,6 +10,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
 
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +26,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
+          pip install pytest-asyncio
           pip install pyinstaller
 
       - name: Run tests

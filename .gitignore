@@ -10,3 +10,6 @@ dist/
 *.db
 *.db-wal
 *.db-shm
+config.json
+config.json.bak
+data_backup/

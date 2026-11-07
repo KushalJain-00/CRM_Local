@@ -260,13 +260,21 @@ def extract_local_fields(parsed: ParsedEml) -> dict:
     return fields
 
 def build_llm_prompt(parsed: ParsedEml) -> str:
+    # Header caps (SEC-10): bound untrusted header size before the LLM call.
+    # Mirrored byte-for-byte to CRM_Developer/services/eml_processor.py.
+    subject = str(parsed.subject or "")[:200]
+    sender_name = str(parsed.sender_name or "")[:100]
+    sender_email = str(parsed.sender_email or "")[:254]
+    receiver_name = str(parsed.receiver_name or "")[:100]
+    receiver_email = str(parsed.receiver_email or "")[:254]
+    date = str(parsed.date or "")[:64]
     zone = parsed.signature_block or parsed.body_text[:2500]
     return (
         "--- BEGIN UNTRUSTED EMAIL CONTENT ---\n"
-        f"Subject: {parsed.subject}\n"
-        f"From: {parsed.sender_name} <{parsed.sender_email}>\n"
-        f"To: {parsed.receiver_name} <{parsed.receiver_email}>\n"
-        f"Date: {parsed.date}\n"
+        f"Subject: {subject}\n"
+        f"From: {sender_name} <{sender_email}>\n"
+        f"To: {receiver_name} <{receiver_email}>\n"
+        f"Date: {date}\n"
         f"Signature detected: {parsed.has_signature}\n"
         f"--- SIGNATURE/BODY ---\n{zone}\n"
         "--- END UNTRUSTED EMAIL CONTENT ---"
