@@ -3,205 +3,791 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>CRM Local</title>
+<script>
+/* Theme boot: runs before first paint so there is no flash of wrong theme.
+   Sets resolved theme (data-theme) + kept preference (data-theme-mode). */
+(function () {
+  try {
+    var mode = localStorage.getItem('crm-theme-mode') || localStorage.getItem('crm-theme') || 'system';
+    if (mode !== 'light' && mode !== 'dark') mode = 'system';
+    var resolved = mode === 'system'
+      ? (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : mode;
+    document.documentElement.setAttribute('data-theme', resolved);
+    document.documentElement.setAttribute('data-theme-mode', mode);
+    if (localStorage.getItem('crm-sb-collapsed') === '1') {
+      document.documentElement.classList.add('sb-collapsed');
+    }
+    if (localStorage.getItem('crm-density') === 'compact') {
+      document.documentElement.setAttribute('data-density', 'compact');
+    }
+  } catch (e) { /* localStorage unavailable -> defaults */ }
+})();
+</script>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<div class="app">
-  <aside class="sidebar">
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<!-- ══════════════════════════ SVG sprite (Lucide-style, inline) ══════════════════════════ -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <defs>
+    <g id="_ic" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></g>
+  </defs>
+  <symbol id="i-dashboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+  <symbol id="i-contact" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 10h2"/><path d="M16 14h2"/><path d="M6.17 15a3 3 0 0 1 5.66 0"/><circle cx="9" cy="11" r="2"/><rect x="2" y="4" width="20" height="16" rx="2"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></symbol>
+  <symbol id="i-chevrons-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-chevron-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></symbol>
+  <symbol id="i-alert-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-alert-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+  <symbol id="i-file-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+  <symbol id="i-file-sheet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M12 13v4"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+  <symbol id="i-command" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></symbol>
+  <symbol id="i-columns" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></symbol>
+  <symbol id="i-rows" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+  <symbol id="i-user-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21a8 8 0 0 1 13.292-6"/><circle cx="10" cy="8" r="5"/><path d="M19 16v6"/><path d="M22 19h-6"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></symbol>
+  <symbol id="i-rotate" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></symbol>
+  <symbol id="i-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+  <symbol id="i-arrow-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 12-7 7-7-7"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01"/><path d="M10 8h.01"/><path d="M14 8h.01"/><path d="M18 8h.01"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/><path d="M7 16h10"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-database" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+  <symbol id="i-drive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" x2="2" y1="12" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/></symbol>
+</svg>
+
+<div class="app" id="app">
+  <!-- ══════════════════════════ Sidebar ══════════════════════════ -->
+  <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
-      <h1>CRM Local</h1>
-      <button class="sidebar-toggle" onclick="toggleSidebar()" aria-label="Toggle sidebar">‹</button>
+      <a class="brand" href="#/overview" onclick="showView('overview')" title="CRM Local — Overview">
+        <span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#i-database"/></svg></span>
+        <span class="brand-name">CRM Local</span>
+        <span class="brand-pill">Local</span>
+      </a>
+      <button type="button" class="btn-icon sidebar-collapse" id="sbToggleBtn" onclick="toggleSidebar()"
+              aria-label="Collapse sidebar" aria-expanded="true" data-tip="Collapse" data-tipdir="right">
+        <svg class="icon"><use href="#i-chevrons-left"/></svg>
+      </button>
     </div>
-    <nav class="nav" role="navigation" aria-label="Main navigation">
-      <a class="nav-item" data-view="overview" onclick="showView('overview')">Overview</a>
-      <a class="nav-item" data-view="extract" onclick="showView('extract')">Extract</a>
-      <a class="nav-item" data-view="contacts" onclick="showView('contacts')">Contacts</a>
-      <a class="nav-item" data-view="emails" onclick="showView('emails')">Emails</a>
-      <a class="nav-item" data-view="profiles" onclick="showView('profiles')">Customer Profiles</a>
-      <a class="nav-item" data-view="analytics" onclick="showView('analytics')">Analytics</a>
-      <a class="nav-item" data-view="quality" onclick="showView('quality')">Data Quality</a>
-      <a class="nav-item" data-view="history" onclick="showView('history')">History</a>
-      <a class="nav-item" data-view="settings" onclick="showView('settings')">Settings</a>
+
+    <nav class="nav" aria-label="Main navigation">
+      <div class="nav-group">
+        <div class="nav-heading">Workspace</div>
+        <a class="nav-item" data-view="overview" href="#/overview" onclick="showView('overview')" title="Overview">
+          <svg class="icon nav-ic"><use href="#i-dashboard"/></svg><span class="nav-label">Overview</span>
+        </a>
+        <a class="nav-item" data-view="extract" href="#/extract" onclick="showView('extract')" title="Extract">
+          <svg class="icon nav-ic"><use href="#i-upload"/></svg><span class="nav-label">Extract</span>
+        </a>
+        <a class="nav-item" data-view="staged" href="#/staged" onclick="showView('staged')" title="Staged review">
+          <svg class="icon nav-ic"><use href="#i-inbox"/></svg><span class="nav-label">Staged review</span>
+          <span class="nav-badge num" id="staged-badge" hidden>0</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-heading">Data</div>
+        <a class="nav-item" data-view="contacts" href="#/contacts" onclick="showView('contacts')" title="Contacts">
+          <svg class="icon nav-ic"><use href="#i-users"/></svg><span class="nav-label">Contacts</span>
+        </a>
+        <a class="nav-item" data-view="emails" href="#/emails" onclick="showView('emails')" title="Emails">
+          <svg class="icon nav-ic"><use href="#i-mail"/></svg><span class="nav-label">Emails</span>
+        </a>
+        <a class="nav-item" data-view="profiles" href="#/profiles" onclick="showView('profiles')" title="Customer Profiles">
+          <svg class="icon nav-ic"><use href="#i-contact"/></svg><span class="nav-label">Customer Profiles</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-heading">Insights</div>
+        <a class="nav-item" data-view="analytics" href="#/analytics" onclick="showView('analytics')" title="Analytics">
+          <svg class="icon nav-ic"><use href="#i-chart"/></svg><span class="nav-label">Analytics</span>
+        </a>
+        <a class="nav-item" data-view="quality" href="#/quality" onclick="showView('quality')" title="Data Quality">
+          <svg class="icon nav-ic"><use href="#i-shield"/></svg><span class="nav-label">Data Quality</span>
+        </a>
+        <a class="nav-item" data-view="history" href="#/history" onclick="showView('history')" title="History">
+          <svg class="icon nav-ic"><use href="#i-history"/></svg><span class="nav-label">History</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-heading">System</div>
+        <a class="nav-item" data-view="settings" href="#/settings" onclick="showView('settings')" title="Settings">
+          <svg class="icon nav-ic"><use href="#i-settings"/></svg><span class="nav-label">Settings</span>
+        </a>
+      </div>
     </nav>
+
+    <div class="sidebar-footer">
+      <button type="button" class="sidebar-kbd" onclick="openPalette()" aria-label="Open command palette (Ctrl+K)">
+        <svg class="icon"><use href="#i-search"/></svg>
+        <span class="nav-label">Quick actions</span>
+        <kbd>Ctrl K</kbd>
+      </button>
+    </div>
   </aside>
-  <main class="main" id="main-content">
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="toggleSidebar()" hidden></div>
+
+  <!-- ══════════════════════════ Main column ══════════════════════════ -->
+  <div class="main">
     <header class="topbar">
-      <button class="hamburger" onclick="toggleSidebar()" aria-label="Toggle sidebar">☰</button>
-      <span id="topTitle">Overview</span>
+      <button type="button" class="btn-icon hamburger" onclick="toggleSidebar()" aria-label="Open navigation" data-tip="Menu">
+        <svg class="icon"><use href="#i-rows"/></svg>
+      </button>
+      <h1 class="topbar-title" id="topTitle">Overview</h1>
+      <div class="topbar-search">
+        <button type="button" class="search-trigger" onclick="openPalette()" aria-label="Search and commands (Ctrl+K)">
+          <svg class="icon"><use href="#i-search"/></svg>
+          <span>Search or run a command…</span>
+          <kbd>Ctrl K</kbd>
+        </button>
+      </div>
       <div class="topbar-actions">
-        <button class="btn btn-sm" onclick="refreshData()">Refresh</button>
+        <button type="button" class="btn-icon" id="themeToggle" onclick="cycleTheme()" aria-label="Theme: system" data-tip="Theme">
+          <svg class="icon icon-sun"><use href="#i-sun"/></svg>
+          <svg class="icon icon-moon"><use href="#i-moon"/></svg>
+          <svg class="icon icon-monitor"><use href="#i-monitor"/></svg>
+        </button>
+        <button type="button" class="btn-icon" id="refreshBtn" onclick="refreshData()" aria-label="Refresh data" data-tip="Refresh">
+          <svg class="icon"><use href="#i-refresh"/></svg>
+        </button>
       </div>
     </header>
-    <div class="content">
-      <!-- Overview -->
-      <div id="view-overview" class="view active">
-        <h2>Overview</h2>
-        <div class="kpi-grid">
-          <div class="kpi-card"><div class="kpi-label">Total Contacts</div><div class="kpi-value" id="kpi-contacts">0</div></div>
-          <div class="kpi-card"><div class="kpi-label">Total Emails</div><div class="kpi-value" id="kpi-emails">0</div></div>
-          <div class="kpi-card"><div class="kpi-label">Files Processed</div><div class="kpi-value" id="kpi-files">0</div></div>
-          <div class="kpi-card"><div class="kpi-label">New Contacts</div><div class="kpi-value" id="kpi-new">0</div></div>
-          <div class="kpi-card"><div class="kpi-label">Duplicates</div><div class="kpi-value" id="kpi-dupes">0</div></div>
-          <div class="kpi-card"><div class="kpi-label">Data Completeness</div><div class="kpi-value" id="kpi-completeness">0%</div></div>
-        </div>
-        <div class="card">
-          <h3>Recent Activity</h3>
-          <div id="recent-activity" class="activity-list">Loading...</div>
-        </div>
-      </div>
 
-      <!-- Extract -->
-      <div id="view-extract" class="view">
-        <h2>Universal Extract</h2>
-        <div class="drop-zone" id="dropZone" ondragover="event.preventDefault()" ondrop="handleDrop(event)">
-          <p>Drag & drop files here or click to browse</p>
-          <p class="hint">Supports: XLSX, XLS, CSV, PDF, TXT, EML</p>
-          <input type="file" id="fileInput" multiple accept=".xlsx,.xls,.csv,.pdf,.txt,.eml" onchange="handleFiles(this.files)" style="display:none">
-          <button class="btn" onclick="document.getElementById('fileInput').click()">Browse Files</button>
-        </div>
-        <div class="file-queue" id="fileQueue"></div>
-        <div class="actions">
-          <button class="btn btn-primary" onclick="startExtraction()" id="extractBtn" disabled>Extract</button>
-          <button class="btn" onclick="clearQueue()">Clear</button>
-        </div>
-        <div class="progress" id="progress" style="display:none">
-          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-          <span id="progressText">0/0</span>
-        </div>
-        <div class="results" id="extractResults"></div>
-      </div>
+    <main class="content" id="main-content">
+      <div class="content-inner">
 
-      <!-- Contacts -->
-      <div id="view-contacts" class="view">
-        <h2>Contacts</h2>
-        <div class="toolbar">
-          <input type="text" id="contactSearch" placeholder="Search contacts..." oninput="searchContacts()">
-          <select id="contactFilter" onchange="filterContacts()">
-            <option value="">All</option>
-            <option value="has_email">Has Email</option>
-            <option value="has_phone">Has Phone</option>
-            <option value="no_company">No Company</option>
-          </select>
-          <button class="btn btn-sm" onclick="exportContacts()">Export</button>
-        </div>
-        <div class="table-container">
-          <table id="contactsTable">
-            <thead><tr>
-              <th onclick="sortContacts('name')">Name</th>
-              <th onclick="sortContacts('email_primary')">Email</th>
-              <th onclick="sortContacts('phone_primary')">Phone</th>
-              <th onclick="sortContacts('company')">Company</th>
-              <th>Actions</th>
-            </tr></thead>
-            <tbody id="contactsBody"></tbody>
-          </table>
-        </div>
-        <div class="pagination" id="contactsPagination"></div>
-      </div>
-
-      <!-- Emails -->
-      <div id="view-emails" class="view">
-        <h2>Emails</h2>
-        <div class="toolbar">
-          <input type="text" id="emailSearch" placeholder="Search emails..." oninput="searchEmails()">
-        </div>
-        <div class="table-container">
-          <table id="emailsTable">
-            <thead><tr>
-              <th>Subject</th>
-              <th>Sender</th>
-              <th>Date</th>
-              <th>Contacts</th>
-            </tr></thead>
-            <tbody id="emailsBody"></tbody>
-          </table>
-        </div>
-        <div class="pagination" id="emailsPagination"></div>
-      </div>
-
-      <!-- Customer Profiles -->
-      <div id="view-profiles" class="view">
-        <h2>Customer Profiles</h2>
-        <div id="profilesList" class="profiles-list">Loading...</div>
-      </div>
-
-      <!-- Analytics -->
-      <div id="view-analytics" class="view">
-        <h2>Analytics</h2>
-        <div class="analytics-grid">
-          <div class="card"><h3>Geographic Distribution</h3><div id="chart-geo"></div></div>
-          <div class="card"><h3>Field Completeness</h3><div id="chart-completeness"></div></div>
-          <div class="card"><h3>Reachability</h3><div id="chart-reachability"></div></div>
-          <div class="card"><h3>Extraction Sources</h3><div id="chart-sources"></div></div>
-        </div>
-      </div>
-
-      <!-- Data Quality -->
-      <div id="view-quality" class="view">
-        <h2>Data Quality</h2>
-        <div class="quality-grid">
-          <div class="card"><h3>Invalid Emails</h3><div id="quality-invalid-emails"></div></div>
-          <div class="card"><h3>Invalid Phones</h3><div id="quality-invalid-phones"></div></div>
-          <div class="card"><h3>Missing Fields</h3><div id="quality-missing"></div></div>
-          <div class="card"><h3>Duplicates</h3><div id="quality-dupes"></div></div>
-        </div>
-      </div>
-
-      <!-- History -->
-      <div id="view-history" class="view">
-        <h2>Processing History</h2>
-        <div class="table-container">
-          <table id="historyTable">
-            <thead><tr>
-              <th>File</th>
-              <th>Status</th>
-              <th>Contacts</th>
-              <th>Processed At</th>
-            </tr></thead>
-            <tbody id="historyBody"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Settings -->
-      <div id="view-settings" class="view">
-        <h2>Settings</h2>
-        <div class="settings-sections">
-          <div class="card">
-            <h3>AI Providers</h3>
-            <div id="providerChain"></div>
-            <button class="btn btn-sm" onclick="addProvider()">Add Provider</button>
+        <!-- ═══════ Overview ═══════ -->
+        <div id="view-overview" class="view" data-title="Overview">
+          <div class="page-head">
+            <div class="page-head-text">
+              <h2>Overview</h2>
+              <p class="page-sub">A snapshot of your local CRM database. Everything stays on this machine.</p>
+            </div>
           </div>
-          <div class="card">
-            <h3>Folders</h3>
-            <label>CRM Directory: <input type="text" id="crmDir" readonly></label>
-            <button class="btn btn-sm" onclick="pickFolder('crm')">Browse</button>
-            <label>EML Directory: <input type="text" id="emlDir" readonly></label>
-            <button class="btn btn-sm" onclick="pickFolder('eml')">Browse</button>
+          <div class="kpi-grid" id="kpiGrid" aria-label="Key metrics">
+            <article class="kpi-card" data-kpi="contacts">
+              <div class="kpi-top"><span class="kpi-label">Total contacts</span><span class="kpi-ic"><svg class="icon"><use href="#i-users"/></svg></span></div>
+              <div class="kpi-value num" id="kpi-contacts">–</div>
+              <div class="kpi-meta"><span class="kpi-delta" id="kpi-contacts-delta" hidden></span><svg class="kpi-spark" id="kpi-contacts-spark" hidden aria-hidden="true"></svg></div>
+            </article>
+            <article class="kpi-card" data-kpi="emails">
+              <div class="kpi-top"><span class="kpi-label">Total emails</span><span class="kpi-ic"><svg class="icon"><use href="#i-mail"/></svg></span></div>
+              <div class="kpi-value num" id="kpi-emails">–</div>
+              <div class="kpi-meta"><span class="kpi-delta" id="kpi-emails-delta" hidden></span><svg class="kpi-spark" id="kpi-emails-spark" hidden aria-hidden="true"></svg></div>
+            </article>
+            <article class="kpi-card" data-kpi="files">
+              <div class="kpi-top"><span class="kpi-label">Files processed</span><span class="kpi-ic"><svg class="icon"><use href="#i-file-text"/></svg></span></div>
+              <div class="kpi-value num" id="kpi-files">–</div>
+              <div class="kpi-meta"><span class="kpi-delta" id="kpi-files-delta" hidden></span><svg class="kpi-spark" id="kpi-files-spark" hidden aria-hidden="true"></svg></div>
+            </article>
+            <article class="kpi-card" data-kpi="new">
+              <div class="kpi-top"><span class="kpi-label">New contacts</span><span class="kpi-ic"><svg class="icon"><use href="#i-user-plus"/></svg></span></div>
+              <div class="kpi-value num" id="kpi-new">–</div>
+              <div class="kpi-meta"><span class="kpi-delta" id="kpi-new-delta" hidden></span><svg class="kpi-spark" id="kpi-new-spark" hidden aria-hidden="true"></svg></div>
+            </article>
+            <article class="kpi-card" data-kpi="completeness">
+              <div class="kpi-top"><span class="kpi-label">Data completeness</span><span class="kpi-ic"><svg class="icon"><use href="#i-gauge"/></svg></span></div>
+              <div class="kpi-value num" id="kpi-completeness">–</div>
+              <div class="kpi-meta"><span class="kpi-note" id="kpi-completeness-note"></span></div>
+            </article>
           </div>
-          <div class="card">
-            <h3>Appearance</h3>
-            <label>Theme:
-              <select id="themeSelect" onchange="setTheme(this.value)">
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
+
+          <section class="card" aria-labelledby="attention-heading">
+            <div class="card-head">
+              <h3 id="attention-heading">Needs attention</h3>
+              <span class="card-sub">Items that may need a decision</span>
+            </div>
+            <div class="attention-grid" id="attentionStrip">
+              <a class="attention-item" href="#/staged" onclick="showView('staged')" id="attention-staged" hidden>
+                <span class="attention-ic tone-info"><svg class="icon"><use href="#i-inbox"/></svg></span>
+                <span class="attention-body"><span class="attention-count num" id="kpi-staged">0</span><span class="attention-label">Staged awaiting review</span></span>
+              </a>
+              <a class="attention-item" href="#/quality" onclick="showView('quality')" id="attention-invalid-emails" hidden>
+                <span class="attention-ic tone-danger"><svg class="icon"><use href="#i-alert-circle"/></svg></span>
+                <span class="attention-body"><span class="attention-count num" id="kpi-dupes-att-emails">0</span><span class="attention-label">Invalid emails</span></span>
+              </a>
+              <a class="attention-item" href="#/quality" onclick="showView('quality')" id="attention-duplicates" hidden>
+                <span class="attention-ic tone-warning"><svg class="icon"><use href="#i-copy"/></svg></span>
+                <span class="attention-body"><span class="attention-count num" id="kpi-dupes">0</span><span class="attention-label">Duplicates</span></span>
+              </a>
+              <a class="attention-item" href="#/quality" onclick="showView('quality')" id="attention-missing" hidden>
+                <span class="attention-ic tone-neutral"><svg class="icon"><use href="#i-ban"/></svg></span>
+                <span class="attention-body"><span class="attention-count num" id="kpi-att-missing">0</span><span class="attention-label">Missing fields</span></span>
+              </a>
+            </div>
+            <p class="empty" id="attentionEmpty" hidden>No issues detected. Your data looks healthy.</p>
+          </section>
+
+          <section class="card" aria-labelledby="activity-heading">
+            <div class="card-head">
+              <h3 id="activity-heading">Recent activity</h3>
+              <button type="button" class="btn-link" onclick="showView('history')">View all history</button>
+            </div>
+            <ol class="activity" id="recent-activity" aria-label="Recent activity"></ol>
+          </section>
+        </div>
+
+        <!-- ═══════ Extract ═══════ -->
+        <div id="view-extract" class="view" data-title="Universal Extract">
+          <div class="page-head">
+            <div class="page-head-text">
+              <h2>Universal Extract</h2>
+              <p class="page-sub">Pull contacts out of spreadsheets, documents and emails. Files are read locally and never leave this machine.</p>
+            </div>
+          </div>
+          <section class="card">
+            <div class="dropzone" id="dropZone" role="region"
+                 aria-label="Drop files here. Supports XLSX, XLS, CSV, PDF, TXT and EML.">
+              <span class="drop-ic" aria-hidden="true"><svg class="icon"><use href="#i-upload"/></svg></span>
+              <div class="drop-text">
+                <strong>Drop files to extract contacts</strong>
+                <span>or</span>
+              </div>
+              <button type="button" class="btn btn-primary" onclick="document.getElementById('fileInput').click()">Browse files</button>
+              <p class="drop-hint">Supported: XLSX, XLS, CSV, PDF, TXT, EML · multiple files allowed</p>
+              <input type="file" id="fileInput" multiple accept=".xlsx,.xls,.csv,.pdf,.txt,.eml" hidden onchange="handleFiles(this.files)">
+            </div>
+
+            <div class="file-queue" id="fileQueue" aria-label="Queued files"></div>
+
+            <div class="actions">
+              <button type="button" class="btn btn-primary" id="extractBtn" onclick="startExtraction()" disabled>
+                <svg class="icon"><use href="#i-sparkle"/></svg>Start extraction
+              </button>
+              <button type="button" class="btn btn-ghost" onclick="clearQueue()">Clear queue</button>
+              <span class="queue-summary num" id="queueSummary"></span>
+            </div>
+
+            <div class="progress" id="progress" hidden>
+              <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Extraction progress">
+                <div class="progress-fill" id="progressFill"></div>
+              </div>
+              <span class="progress-text num" id="progressText">0/0</span>
+            </div>
+
+            <div class="results" id="extractResults" aria-live="polite"></div>
+          </section>
+        </div>
+
+        <!-- ═══════ Staged review ═══════ -->
+        <div id="view-staged" class="view" data-title="Staged Review">
+          <div class="page-head">
+            <div class="page-head-text">
+              <h2>Staged review</h2>
+              <p class="page-sub">Approve, reject or dismiss extracted contacts before they enter your CRM.</p>
+            </div>
+            <div class="kbd-hints" aria-label="Keyboard shortcuts">
+              <span><kbd>J</kbd><kbd>K</kbd> move</span>
+              <span><kbd>A</kbd> approve</span>
+              <span><kbd>R</kbd> reject</span>
+              <span><kbd>D</kbd> dismiss</span>
+              <span><kbd>Enter</kbd> open</span>
+            </div>
+          </div>
+          <div class="toolbar">
+            <div class="search-field">
+              <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+              <input type="search" id="stagedSearch" placeholder="Filter this page…" aria-label="Filter staged contacts" oninput="filterStaged()">
+            </div>
+            <select id="stagedFilter" class="select" aria-label="Filter by review status" onchange="filterStaged()">
+              <option value="">All statuses</option>
+              <option value="NEW">New</option>
+              <option value="NEEDS_REVIEW">Needs review</option>
+              <option value="READY">Ready</option>
+              <option value="APPROVED">Approved</option>
+              <option value="REJECTED">Rejected</option>
+              <option value="DISMISSED">Dismissed</option>
+            </select>
+            <div class="toolbar-spacer"></div>
+            <button type="button" class="btn btn-secondary btn-sm" id="stagedBulkApprove" onclick="bulkApproveStaged()" disabled>
+              <svg class="icon"><use href="#i-check"/></svg>Approve selected
+            </button>
+          </div>
+          <div class="table-zone">
+            <div class="table-container" data-density="comfortable">
+              <table id="stagedTable">
+                <thead><tr>
+                  <th class="c-check"><input type="checkbox" id="stagedCheckAll" aria-label="Select all staged rows on this page"></th>
+                  <th class="c-name" scope="col">Name</th>
+                  <th class="c-email" scope="col">Email</th>
+                  <th class="c-phone" scope="col">Phone</th>
+                  <th class="c-company" scope="col">Company</th>
+                  <th class="c-review" scope="col">Review</th>
+                  <th class="c-dedup" scope="col">Dedup</th>
+                  <th class="c-import" scope="col">Import</th>
+                  <th class="c-conf" scope="col">Confidence</th>
+                  <th class="c-actions"><span class="sr-only">Actions</span></th>
+                </tr></thead>
+                <tbody id="stagedContactsBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="table-footer">
+            <span class="table-info" id="stagedInfo"></span>
+            <div class="pagination" id="stagedPagination"></div>
+          </div>
+        </div>
+
+        <!-- ═══════ Contacts ═══════ -->
+        <div id="view-contacts" class="view" data-title="Contacts">
+          <div class="page-head">
+            <div class="page-head-text">
+              <h2>Contacts</h2>
+              <p class="page-sub">Everyone in your CRM. Search, sort, edit and export.</p>
+            </div>
+          </div>
+          <div class="toolbar">
+            <div class="search-field">
+              <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+              <input type="search" id="contactSearch" placeholder="Search contacts…" aria-label="Search contacts" oninput="searchContacts()">
+            </div>
+            <select id="contactFilter" class="select" aria-label="Filter contacts" onchange="filterContacts()">
+              <option value="">All contacts</option>
+              <option value="has_email">Has email</option>
+              <option value="has_phone">Has phone</option>
+              <option value="no_company">No company</option>
+            </select>
+            <div class="toolbar-spacer"></div>
+            <button type="button" class="btn-icon" id="contactsDensity" onclick="toggleDensity('contactsTable')" aria-label="Toggle row density" data-tip="Density" aria-pressed="false">
+              <svg class="icon"><use href="#i-rows"/></svg>
+            </button>
+            <div class="menu-wrap">
+              <button type="button" class="btn-icon" id="contactsColsBtn" aria-label="Choose columns" aria-haspopup="true" aria-expanded="false" data-tip="Columns">
+                <svg class="icon"><use href="#i-columns"/></svg>
+              </button>
+              <div class="menu" id="contactsColsMenu" popover="auto">
+                <div class="menu-title">Visible columns</div>
+                <label class="menu-item"><input type="checkbox" checked data-col="c-name">Name</label>
+                <label class="menu-item"><input type="checkbox" checked data-col="c-email">Email</label>
+                <label class="menu-item"><input type="checkbox" checked data-col="c-phone">Phone</label>
+                <label class="menu-item"><input type="checkbox" checked data-col="c-company">Company</label>
+              </div>
+            </div>
+            <button type="button" class="btn btn-secondary" onclick="exportContacts()">
+              <svg class="icon"><use href="#i-download"/></svg>Export
+            </button>
+          </div>
+          <div class="banner error" id="contactsBanner" hidden></div>
+          <div class="table-zone">
+            <div class="table-container" data-density="comfortable" id="contactsContainer">
+              <table id="contactsTable">
+                <thead><tr>
+                  <th class="c-check"><input type="checkbox" id="contactsCheckAll" aria-label="Select all contacts on this page"></th>
+                  <th class="c-name" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortContacts('name')">Name<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-email" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortContacts('email_primary')">Email<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-phone" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortContacts('phone_primary')">Phone<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-company" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortContacts('company')">Company<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-actions"><span class="sr-only">Actions</span></th>
+                </tr></thead>
+                <tbody id="contactsBody"></tbody>
+              </table>
+            </div>
+            <div class="bulkbar" id="contactsBulkbar" hidden>
+              <span class="bulk-count num" id="contactsBulkCount">0 selected</span>
+              <div class="bulk-actions">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="exportSelectedContacts()">
+                  <svg class="icon"><use href="#i-download"/></svg>Export selected
+                </button>
+                <button type="button" class="btn btn-danger btn-sm" onclick="deleteSelectedContacts()">
+                  <svg class="icon"><use href="#i-trash"/></svg>Delete
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="table-footer">
+            <span class="table-info" id="contactsInfo"></span>
+            <div class="pagination" id="contactsPagination"></div>
+            <label class="page-size">Rows per page
+              <select id="contactsPageSize" aria-label="Rows per page" onchange="changeContactsPageSize(this.value)">
+                <option>25</option><option selected>50</option><option>100</option>
               </select>
             </label>
           </div>
-          <div class="card">
-            <h3>Processing</h3>
-            <label>Watch interval (seconds): <input type="number" id="watchInterval" min="10" value="30"></label>
-            <label><input type="checkbox" id="watchEnabled"> Enable folder watching</label>
+        </div>
+
+        <!-- ═══════ Emails ═══════ -->
+        <div id="view-emails" class="view" data-title="Emails">
+          <div class="page-head">
+            <div class="page-head-text">
+              <h2>Emails</h2>
+              <p class="page-sub">Emails discovered during extraction and how many contacts they relate to.</p>
+            </div>
           </div>
-          <div class="actions">
-            <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+          <div class="toolbar">
+            <div class="search-field">
+              <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+              <input type="search" id="emailSearch" placeholder="Search emails…" aria-label="Search emails" oninput="searchEmails()">
+            </div>
+            <div class="toolbar-spacer"></div>
+            <button type="button" class="btn-icon" id="emailsDensity" onclick="toggleDensity('emailsTable')" aria-label="Toggle row density" data-tip="Density" aria-pressed="false">
+              <svg class="icon"><use href="#i-rows"/></svg>
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="exportEmails()">
+              <svg class="icon"><use href="#i-download"/></svg>Export
+            </button>
+          </div>
+          <div class="table-zone">
+            <div class="table-container" data-density="comfortable">
+              <table id="emailsTable">
+                <thead><tr>
+                  <th class="c-subject" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortEmails('subject')">Subject<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-sender" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortEmails('sender_name')">Sender<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-date" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortEmails('date')">Date<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-count" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortEmails('contact_count')">Contacts<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                </tr></thead>
+                <tbody id="emailsBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="table-footer">
+            <span class="table-info" id="emailsInfo"></span>
+            <div class="pagination" id="emailsPagination"></div>
           </div>
         </div>
+
+        <!-- ═══════ Customer Profiles ═══════ -->
+        <div id="view-profiles" class="view" data-title="Customer Profiles">
+          <div class="page-head">
+            <div class="page-head-text">
+              <h2>Customer profiles</h2>
+              <p class="page-sub">Contact cards with profile completeness at a glance.</p>
+            </div>
+          </div>
+          <div class="toolbar">
+            <div class="search-field">
+              <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+              <input type="search" id="profileSearch" placeholder="Filter profiles…" aria-label="Filter profiles" oninput="renderCustomerProfiles()">
+            </div>
+          </div>
+          <div id="profilesList" class="profiles-grid"></div>
+        </div>
+
+        <!-- ═══════ Analytics ═══════ -->
+        <div id="view-analytics" class="view" data-title="Analytics">
+          <div class="page-head">
+            <div class="page-head-text">
+              <h2>Analytics</h2>
+              <p class="page-sub">Shape of your contact database. Charts are drawn locally from your data.</p>
+            </div>
+          </div>
+          <div class="chart-grid">
+            <section class="card chart-card">
+              <div class="card-head">
+                <div>
+                  <h3 id="chart-geo-takeaway">Geographic distribution</h3>
+                  <span class="card-sub">Geographic distribution</span>
+                </div>
+                <button type="button" class="btn-link" data-charttable="chart-geo">View as table</button>
+              </div>
+              <div class="chart-host" id="chart-geo"></div>
+            </section>
+            <section class="card chart-card">
+              <div class="card-head">
+                <div>
+                  <h3 id="chart-completeness-takeaway">Field completeness</h3>
+                  <span class="card-sub">Field completeness</span>
+                </div>
+                <button type="button" class="btn-link" data-charttable="chart-completeness">View as table</button>
+              </div>
+              <div class="chart-host" id="chart-completeness"></div>
+            </section>
+            <section class="card chart-card">
+              <div class="card-head">
+                <div>
+                  <h3 id="chart-reachability-takeaway">Reachability</h3>
+                  <span class="card-sub">Reachability</span>
+                </div>
+                <button type="button" class="btn-link" data-charttable="chart-reachability">View as table</button>
+              </div>
+              <div class="chart-host" id="chart-reachability"></div>
+            </section>
+            <section class="card chart-card">
+              <div class="card-head">
+                <div>
+                  <h3 id="chart-sources-takeaway">Extraction sources</h3>
+                  <span class="card-sub">Extraction sources</span>
+                </div>
+                <button type="button" class="btn-link" data-charttable="chart-sources">View as table</button>
+              </div>
+              <div class="chart-host" id="chart-sources"></div>
+            </section>
+          </div>
+        </div>
+
+        <!-- ═══════ Data Quality ═══════ -->
+        <div id="view-quality" class="view" data-title="Data Quality">
+          <div class="page-head">
+            <div class="page-head-text">
+              <h2>Data quality</h2>
+              <p class="page-sub">What to fix first, and where.</p>
+            </div>
+          </div>
+          <div class="quality-grid">
+            <section class="card quality-card">
+              <div class="quality-head">
+                <span class="quality-ic tone-danger"><svg class="icon"><use href="#i-alert-circle"/></svg></span>
+                <div class="quality-count num" id="quality-invalid-emails">–</div>
+                <span class="sev-pill sev-danger"><svg class="icon"><use href="#i-alert-circle"/></svg>High</span>
+              </div>
+              <h3>Invalid emails</h3>
+              <p class="card-sub">Contacts whose primary email failed validation.</p>
+              <div class="quality-list" id="quality-invalid-emails-list"></div>
+              <button type="button" class="btn-link" onclick="showView('contacts')">Review in Contacts</button>
+            </section>
+            <section class="card quality-card">
+              <div class="quality-head">
+                <span class="quality-ic tone-warning"><svg class="icon"><use href="#i-alert-circle"/></svg></span>
+                <div class="quality-count num" id="quality-invalid-phones">–</div>
+                <span class="sev-pill sev-warning"><svg class="icon"><use href="#i-alert-triangle"/></svg>Medium</span>
+              </div>
+              <h3>Invalid phones</h3>
+              <p class="card-sub">Phone numbers that do not look dialable.</p>
+              <div class="quality-list" id="quality-invalid-phones-list"></div>
+              <button type="button" class="btn-link" onclick="showView('contacts')">Review in Contacts</button>
+            </section>
+            <section class="card quality-card">
+              <div class="quality-head">
+                <span class="quality-ic tone-neutral"><svg class="icon"><use href="#i-ban"/></svg></span>
+                <div class="quality-count num" id="quality-missing">–</div>
+                <span class="sev-pill sev-neutral"><svg class="icon"><use href="#i-info"/></svg>Low</span>
+              </div>
+              <h3>Missing fields</h3>
+              <p class="card-sub">Records that are incomplete and may need a top-up.</p>
+              <div class="quality-list" id="quality-missing-list"></div>
+              <button type="button" class="btn-link" onclick="showView('contacts')">Review in Contacts</button>
+            </section>
+            <section class="card quality-card">
+              <div class="quality-head">
+                <span class="quality-ic tone-warning"><svg class="icon"><use href="#i-copy"/></svg></span>
+                <div class="quality-count num" id="quality-dupes">–</div>
+                <span class="sev-pill sev-warning"><svg class="icon"><use href="#i-copy"/></svg>Medium</span>
+              </div>
+              <h3>Duplicates</h3>
+              <p class="card-sub">Records that look like existing contacts.</p>
+              <div class="quality-list" id="quality-dupes-list"></div>
+              <button type="button" class="btn-link" onclick="showView('staged')">Review staged contacts</button>
+            </section>
+          </div>
+          <section class="card" id="quality-detail-card">
+            <div class="card-head"><h3>Detection rules</h3><span class="card-sub">Latest run of automated checks</span></div>
+            <div id="quality-detail-list" class="quality-rules"></div>
+          </section>
+        </div>
+
+        <!-- ═══════ History ═══════ -->
+        <div id="view-history" class="view" data-title="Processing History">
+          <div class="page-head">
+            <div class="page-head-text">
+              <h2>Processing history</h2>
+              <p class="page-sub">Every file that has been through extraction.</p>
+            </div>
+          </div>
+          <div class="toolbar">
+            <div class="search-field">
+              <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+              <input type="search" id="historySearch" placeholder="Filter files…" aria-label="Filter history" oninput="filterHistory()">
+            </div>
+            <div class="toolbar-spacer"></div>
+            <button type="button" class="btn-icon" id="historyDensity" onclick="toggleDensity('historyTable')" aria-label="Toggle row density" data-tip="Density" aria-pressed="false">
+              <svg class="icon"><use href="#i-rows"/></svg>
+            </button>
+          </div>
+          <div class="table-zone">
+            <div class="table-container" data-density="comfortable">
+              <table id="historyTable">
+                <thead><tr>
+                  <th class="c-file" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortHistory('file')">File<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-status" scope="col">Status</th>
+                  <th class="c-count" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortHistory('contacts_found')">Contacts<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-date" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortHistory('processed_at')">Processed at<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                </tr></thead>
+                <tbody id="historyBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="table-footer"><span class="table-info" id="historyInfo"></span></div>
+        </div>
+
+        <!-- ═══════ Settings ═══════ -->
+        <div id="view-settings" class="view" data-title="Settings">
+          <div class="page-head">
+            <div class="page-head-text">
+              <h2>Settings</h2>
+              <p class="page-sub">AI providers, folders and processing preferences for this machine.</p>
+            </div>
+          </div>
+          <div class="banner" id="settingsBanner" hidden></div>
+          <div class="settings-layout">
+            <nav class="settings-nav" aria-label="Settings sections">
+              <a href="#set-providers" class="settings-link">AI providers</a>
+              <a href="#set-folders" class="settings-link">Folders</a>
+              <a href="#set-appearance" class="settings-link">Appearance</a>
+              <a href="#set-processing" class="settings-link">Processing</a>
+            </nav>
+            <div class="settings-sections">
+              <section class="card" id="set-providers" aria-labelledby="h-providers">
+                <div class="card-head">
+                  <div><h3 id="h-providers">AI providers</h3><span class="card-sub">Tried in order, top to bottom, until one succeeds.</span></div>
+                </div>
+                <ol id="providerChain" class="provider-chain"></ol>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="addProvider()">
+                  <svg class="icon"><use href="#i-plus"/></svg>Add provider
+                </button>
+              </section>
+              <section class="card" id="set-folders" aria-labelledby="h-folders">
+                <div class="card-head">
+                  <div><h3 id="h-folders">Folders</h3><span class="card-sub">Where files are picked up and stored.</span></div>
+                </div>
+                <div class="field">
+                  <label for="crmDir">CRM directory</label>
+                  <div class="field-row">
+                    <input type="text" id="crmDir" class="mono" placeholder="e.g. C:\CRM\data" aria-describedby="crmDirHelp">
+                    <button type="button" class="btn btn-secondary" onclick="pickFolder('crm')"><svg class="icon"><use href="#i-folder"/></svg>Browse</button>
+                  </div>
+                  <p class="field-help" id="crmDirHelp">Contacts database and exports.</p>
+                </div>
+                <div class="field">
+                  <label for="emlDir">EML directory</label>
+                  <div class="field-row">
+                    <input type="text" id="emlDir" class="mono" placeholder="e.g. C:\MailDump" aria-describedby="emlDirHelp">
+                    <button type="button" class="btn btn-secondary" onclick="pickFolder('eml')"><svg class="icon"><use href="#i-folder"/></svg>Browse</button>
+                  </div>
+                  <p class="field-help" id="emlDirHelp">Watched for .eml files to extract.</p>
+                </div>
+              </section>
+              <section class="card" id="set-appearance" aria-labelledby="h-appearance">
+                <div class="card-head">
+                  <div><h3 id="h-appearance">Appearance</h3><span class="card-sub">Comfortable for long sessions in any lighting.</span></div>
+                </div>
+                <fieldset class="segmented" role="radiogroup" aria-label="Theme">
+                  <legend class="sr-only">Theme</legend>
+                  <label class="seg"><input type="radio" name="theme-mode" value="light"><svg class="icon"><use href="#i-sun"/></svg>Light</label>
+                  <label class="seg"><input type="radio" name="theme-mode" value="dark"><svg class="icon"><use href="#i-moon"/></svg>Dark</label>
+                  <label class="seg"><input type="radio" name="theme-mode" value="system" checked><svg class="icon"><use href="#i-monitor"/></svg>System</label>
+                </fieldset>
+                <p class="field-help">System follows your Windows colour scheme and switches automatically.</p>
+                <select id="themeSelect" hidden aria-hidden="true" tabindex="-1" class="sr-only">
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                  <option value="system">System</option>
+                </select>
+              </section>
+              <section class="card" id="set-processing" aria-labelledby="h-processing">
+                <div class="card-head">
+                  <div><h3 id="h-processing">Processing</h3><span class="card-sub">How often watched folders are scanned.</span></div>
+                </div>
+                <div class="field">
+                  <label for="watchInterval">Watch interval (seconds)</label>
+                  <input type="number" id="watchInterval" class="num" min="10" step="5" value="30">
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="watchEnabled" checked>
+                  <span class="switch-track" aria-hidden="true"></span>
+                  <span class="switch-label">Enable folder watching</span>
+                </label>
+              </section>
+              <div class="settings-savebar">
+                <span class="dirty-pill" id="settingsDirty" hidden><span class="dirty-dot" aria-hidden="true"></span>Unsaved changes</span>
+                <button type="button" class="btn btn-primary" onclick="saveSettings()">Save settings</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
-    </div>
-  </main>
+    </main>
+  </div>
 </div>
+
+<!-- ══════════════════════════ Drawer (contact / staged detail) ══════════════════════════ -->
+<aside id="drawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" hidden>
+  <div class="drawer-backdrop" data-close-drawer></div>
+  <div class="drawer-panel">
+    <header class="drawer-head">
+      <div class="drawer-head-text">
+        <h2 id="drawerTitle">Details</h2>
+        <p class="drawer-sub" id="drawerSub"></p>
+      </div>
+      <button type="button" class="btn-icon" data-close-drawer aria-label="Close panel">
+        <svg class="icon"><use href="#i-x"/></svg>
+      </button>
+    </header>
+    <div class="drawer-body" id="drawerBody"></div>
+  </div>
+</aside>
+
+<!-- ══════════════════════════ Confirm dialog ══════════════════════════ -->
+<dialog id="confirmDialog" class="dialog" aria-labelledby="confirmTitle">
+  <span class="dialog-ic tone-warning" aria-hidden="true"><svg class="icon"><use href="#i-alert-triangle"/></svg></span>
+  <h2 id="confirmTitle">Are you sure?</h2>
+  <p id="confirmMessage"></p>
+  <menu class="dialog-actions">
+    <button type="button" class="btn btn-secondary" id="confirmCancel">Cancel</button>
+    <button type="button" class="btn btn-danger" id="confirmOk">Confirm</button>
+  </menu>
+</dialog>
+
+<!-- ══════════════════════════ Command palette (Ctrl+K) ══════════════════════════ -->
+<div id="palette" class="palette" hidden>
+  <div class="palette-backdrop" data-close-palette></div>
+  <div class="palette-panel" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="palette-input-wrap">
+      <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+      <input type="text" id="paletteInput" placeholder="Search views, actions, contacts…" autocomplete="off" spellcheck="false"
+             role="combobox" aria-expanded="true" aria-controls="paletteList" aria-activedescendant="">
+      <kbd>Esc</kbd>
+    </div>
+    <ul id="paletteList" role="listbox" aria-label="Results"></ul>
+    <footer class="palette-foot">
+      <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+      <span><kbd>↵</kbd> run</span>
+      <span><kbd>Esc</kbd> close</span>
+    </footer>
+  </div>
+</div>
+
+<!-- ══════════════════════════ Toasts ══════════════════════════ -->
+<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
+<noscript><div class="noscript">CRM Local needs JavaScript to run. Please enable it and reload.</div></noscript>
 <script src="/static/app.js"></script>
 </body>
 </html>

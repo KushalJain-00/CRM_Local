@@ -1,175 +1,126 @@
-# CRM_Local Design System — Swiss-Minimal Data-Dense Shell
+# CRM_Local Design System — "Quiet chrome, dense data"
 
-**Author:** D-031 design direction accepted (2026-11-07)
-**Scope:** Phases 2–6; localhost-only; WCAG 2.2 AA; zero remote deps; PyInstaller-compatible
-**Base theme:** Two palettes (light / dark) sharing token names; actual CSS variables differ per theme.
-
----
-
-## 1. Color Tokens
-
-| Name | Light (#F7F7F5 / #1C1C1A) | Dark | Contrast (min) |
-|------|---------------------------|------|----------------|
-| `colorBase` | `#F7F7F5` (warm cream) | `#1C1C1A` (near-black) | — |
-| `colorAccent` | `#2563EB` (single blue accent) | `#2563EB` (same — intensity adjusted via opacity) | ≥4.5:1 |
-| `colorSuccess` | `#059669` (green) | `#10B981` (lighter green) | ≥4.5:1 |
-| `colorWarning` | `#D97705` (orange) | `#F59E0B` (lighter orange) | ≥4.5:1 |
-| `colorError` | `#DC2626` (red) | `#F87171` (lighter red) | ≥4.5:1 |
-| `colorMuted` | `#6B7280` (muted gray) | `#9CA3AF` (muted gray) | ≥4.5:1 on text, ≥3:1 on borders |
-
-**Usage:**
-- `colorBase` = page/container backgrounds
-- `colorAccent` = primary action highlights, focus rings, link emphasis
-- `colorSuccess` / `colorWarning` / `colorError` = status badges, validation states
-- `colorMuted` = placeholder text, secondary labels, disabled borders
+**Scope:** Localhost-only desktop UI (FastAPI + PyInstaller), vanilla HTML/CSS/JS, zero remote dependencies, WCAG 2.2 AA.
+**Supersedes:** the 2026-11-07 Swiss-minimal spec (the 640–768px max-container and radius-0 rules are retired — they were wrong for a data dashboard).
 
 ---
 
-## 2. Typography
+## 1. CSS architecture
 
-**Typeface family:** `Inter` (display/headline) + `IBM Plex Mono` (monospace/code/number fields).
+- Single stylesheet `static/style.css`, organized in **native cascade layers**:
+  `@layer reset, tokens, base, components, utilities` — no specificity wars; utilities always win.
+- **Native nesting** used sparingly inside layers.
+- Class naming: BEM-light single-class selectors (`.btn-primary`, `.kpi-card`, `.queue-item`).
+- JS hooks: element IDs (unchanged contract) + data attributes; no `js-` prefix needed since inline-handler names are part of the contract.
+- Container queries: `.content-inner` is `container-name: page`; KPI grid, attention grid, chart grid, quality grid and settings layout respond to **available width** (so they adapt when the sidebar collapses), not to viewport width. `.kpi-card` is itself a container (sparkline hides below 200px).
 
-| Role | Font | Weight | Line-height | Notes |
-|------|------|--------|-------------|-------|
-| `fontFamilyBase` | `Inter`, system-ui, sans-serif | 400 (default) | 1.5 | Line-length ≤80ch; serif can stretch to 85ch |
-| `fontFamilyMono` | `IBM Plex Mono`, ui-monospace, monospace | 400/500 | 1.4 | Used for phone/email/address fields, numeric displays |
-| `fontSize` | 16px (1rem) | — | — | Base increment: 4/8px scale |
-| `fontSize-sm` | 14px (0.875rem) | — | — | Forms, compact tables |
-| `fontSize-lg` | 18px (1.125rem) | — | — | Section headers |
-| `fontSize-xl` | 22px (1.375rem) | — | — | Page headings |
-| `fontWeight-bold` | — | 600/700 | — | CTA buttons, section headers |
+## 2. Token tiers
 
-**No decorative accent on single headline word** (avoids AI tell).
-**No all-caps labels** (forms use sentence case).
-**Line lengths:** base ≤80ch; serif body can 85ch; mono fields fixed-ch width ch.
+### Tier 1 — primitives (`:root`, never used directly by components)
+- Fonts: `--font-ui` (Inter variable), `--font-mono` (IBM Plex Mono). Self-hosted woff2 in `static/fonts/`.
+- Spacing: `--s-1…--s-8` = 4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 px. **Only 4/8 steps** — 12 and 24 are 3×4/… used for control rhythm; nothing arbitrary.
+- Radii: `--r-control: 6px`, `--r-panel: 8px`, `--r-pill: 999px` (pills/avatars only).
+- Type scale: `--fs-12/13/14/16/20/24`. Body = 14px (density); 13px tables; 24px KPI values.
+- Motion: `--dur-instant 80ms`, `--dur-fast 120ms`, `--dur-base 200ms`, `--dur-slow 320ms`; `--ease-enter: cubic-bezier(.25,1,.5,1)`, `--ease-exit: cubic-bezier(.7,0,.84,0)`. Exits ≈ 75 % of enter duration. No `ease`, no bounce.
+- Okabe–Ito chart primitives (`--ok-blue…--ok-pink`).
 
----
+### Tier 2 — semantic (theme-agnostic names, resolved with `light-dark()`)
+| Token | Light | Dark | Notes |
+|---|---|---|---|
+| `--surface-base` | warm paper ≈ `#f6f6f4` | `oklch(19% …)` ≈ `#121316` | never pure white/black |
+| `--surface-raised` | white | ≈ `#1a1b1f` | cards, tables |
+| `--surface-popover` | white | ≈ `#23242a` | palette, toasts, dialog |
+| `--surface-inset` | subtle grey | darker step | search field, tracks |
+| `--text-primary` | ≈ `#1a1c20` (15.2:1) | ≈ `#e6e6e6` (14.1:1) | never pure white in dark |
+| `--text-secondary` | 7.2:1 on base | 7.2:1 | meta text |
+| `--text-faint` | 5.6:1 | 5.5:1 | placeholders, timestamps |
+| `--border-subtle` / `--border-strong` | hairlines | `rgb(255 255 255 / 9% / 16%)` | elevation = border + surface step |
+| `--accent` | ≈ `#2563eb` (5.2:1 non-text on base) | ≈ `#8ab4f8` (9.3:1) | desaturated + lightened in dark |
+| `--accent-hover` / `--accent-pressed` | derived with `color-mix(in oklch, …)` | same | no hardcoded hex |
+| `--success/-text`, `--warning/-text`, `--danger/-text`, `--info/-text` | AA-verified (6.9–8.3:1) | luminance-boosted (6.5–9.1:1) | color = meaning only |
+| `--success-bg/-warning-bg/-danger-bg/-info-bg` | tint mixed into the surface they sit on | same | badges, banners, bulk bar |
+| `--chart-1…6` | Okabe–Ito | lightness-boosted Okabe–Ito | re-verified ≥3:1 vs `--surface-raised` |
+| `--shadow-1` / `--shadow-2` | whisper / popover | stronger | no heavy shadows |
+| `--backdrop` | `oklch(0 0 0 / 38%)` | 58% | overlays |
+| `--row-hover` | 3 % ink | 4 % light | table hover |
 
-## 3. Layout + Grid
+**Theming:** `:root { color-scheme: light dark }` + `light-dark()` on every semantic token. `[data-theme="light"]` / `[data-theme="dark"]` force one side; without them (or `data-theme-mode="system"`) the UI follows `prefers-color-scheme`. A tiny pre-paint boot script in `<head>` applies the stored preference so there is no flash. For engines without `light-dark()`, an `@supports not` fallback block mirrors the same values driven by `[data-theme]` + `prefers-color-scheme`.
+**Settings offers Light / Dark / System** (segmented control + topbar cycle button + legacy hidden `#themeSelect` kept in sync).
 
-- **Spacing scale:** 4px / 8px only (no arbitrary values).
-- **Max container width:** 640px (compact) / 768px (wider screens) — centered with `margin: 0 auto`.
-- **Alignment:** content left-aligned (ragged-right) except hero/headline centers; tables left-aligned.
-- **Grid:** implicit columns via `ch` units for text; grid columns for data tables (e.g. `minmax(120px, 1fr)` for name/email/phone).
+### Tier 3 — component tokens
+`--control-h 36px`, `--control-h-sm 30px`, `--sidebar-w 236px`, `--sidebar-w-collapsed 64px`, `--topbar-h 52px`, `--focus-ring`.
 
----
+## 3. Typography
 
-## 4. Core Components
+- Inter for UI, IBM Plex Mono for emails, phones, IDs, counts, dates, pagination.
+- Scale 12 / 13 / 14 / 16 / 20 / 24; body 14. Weights **400 / 500 / 600 only** (Inter variable file).
+- Sentence case everywhere; no all-caps labels (nav group headings are sentence-case, 11px, secondary).
+- `font-variant-numeric: tabular-nums` on all numbers (`.num`, KPI values, table numerics, badges counts).
+- `text-wrap: balance` on headings.
+- Mono usage: `input.mono`, `.cell.mono`, `.q-name`, `.chart-value`, `.activity-time`, `.completeness-label`, `.provider-order`, kbd.
 
-### Buttons
-| Variant | Background | Color | Border | Hover | Focus |
-|---------|-----------|-------|--------|-------|-------|
-| `primary` | `colorAccent` | white | none | opacity 90% | `outline: 2px solid colorAccent`; `outline-offset: 2px` |
-| `secondary` | white | `colorBase` | 1px solid #e5e7eb | hover bg #f3f4f6 | same focus style |
-| `danger` | `#FECACA` (light) / `#F87171` (dark) | `#DC2626` | none | opacity 90% | `outline: 2px solid #DC2626` |
+## 4. Layout
 
-**All buttons:** `font-weight: 500`; `padding: 8px 16px`; `border-radius: 0` (border-first, no rounding); `cursor: pointer`; `transition: opacity .2s`; `user-select: none`.
+- Shell: collapsible sidebar (icon rail 64px, tooltips via `[data-tip]`, active item = accent bar + tint), sticky-flavored topbar (title + Ctrl+K search trigger + theme + Refresh), scrolling content region.
+- Content `max-width: 1440px`, fluid, centered; padding 24px (16px ≤1100px).
+- Breakpoints (media): ≤1100px sidebar auto-rail; ≤900px sidebar off-canvas (hamburger toggles, backdrop, auto-closes on navigation, hamburger floats above while open). Container queries handle the rest.
+- `scrollbar-gutter: stable` on `html` and `.content`; styled thin scrollbars both themes.
 
-### Status Badges
-- Inline `display: inline-flex`; `align-items: center`; `gap: 4px`;
-- `padding: 2px 6px`; `font-size: 12px`; `font-weight: 500`; `border-radius: 0`;
-- Background = status color token; text = white; `min-width: 24px`; `text-align: center`.
+## 5. Components (states: default / hover / focus-visible / active / disabled / loading / empty / error)
 
-### Inputs
-- `width: 100%`; `padding: 8px`; `font: inherit`; `border: 1px solid #e5e7eb` (light) / `#374151` (dark);
-- `border-radius: 0`; `font-size: 16px`; `background: white` (light) / `#1f2937` (dark);
-- `&:focus` = `outline: 2px solid colorAccent`; `outline-offset: 2px`;
-- `&:disabled` = opacity 50%; cursor not-allowed.
+- **Buttons** primary / secondary / ghost / danger; `btn-sm`; `btn-icon`; `btn-link`. 36px visual height with an invisible `::after` hit-area extension to **44px effective target** (primary actions); 30px sm buttons extend ±7px. Press = `scale(.98)` 80ms. Disabled = 45 % opacity, no hit area, `not-allowed`.
+- **Inputs / select / checkbox / switch / segmented**: 36px controls, focus ring = accent border + 3px `color-mix` halo; switch is a real checkbox + track; segmented uses `:has(input:checked)`.
+- **Badges / severity pills**: icon + text (never color alone), tinted bg + 25 % border, pill radius.
+- **Tooltips**: CSS-only `[data-tip]` on hover and `:focus-visible`; `data-tipdir="right"` variant for the collapsed rail.
+- **Toasts**: stacked bottom-right in `#toasts` (`role="status"` `aria-live="polite"`), 4 s default, pause on hover, optional actions (Undo), dismiss button, enter via `@starting-style`, exit via `.is-leaving` (keyframe fallback for engines without `transition-behavior`).
+- **Confirm dialog**: native `<dialog>`, centered, focus trapped by the UA, Esc handled, focus returned to opener, promise-based `confirmDialog()`. `window.confirm` fallback on very old engines.
+- **Drawer**: right-side panel 440px for contact / staged detail; slide + fade; backdrop click / Esc / ✕ close; focus trap; focus returned.
+- **Command palette**: Ctrl+K, grouped results (Go to view / Actions / Contacts), fuzzy subsequence scoring, listbox + `aria-activedescendant`, ↑/↓/Enter/Esc, opens ≤150 ms, fails silently if init errors.
+- **Tables**: toolbar (search, filter select, density toggle, column visibility menu (`popover` attribute with hidden-toggle fallback), Export); sticky header; sortable headers = `<button class="th-btn">` + `aria-sort` + arrow; row hover; checkbox column + select-all (indeterminate state); **bulk bar appears via `:has(.row-check:checked)`** (JS `hidden` fallback for engines without `:has`); row actions revealed on hover / `:focus-within` (always visible on `hover: none` devices); ellipsis cells with `title`; numbers right-aligned mono; footer "Showing X–Y of Z" + page size + pagination.
+- **Skeletons**: shimmer bars matching final row shape — no layout shift; skeletons are injected into tables/lists before fetches.
+- **Empty states**: icon + one-line instruction + primary CTA (`emptyStateHTML()`), used in every table, list, chart and the activity feed.
+- **Banners**: inline error/info/success with plain-language fixes.
+- **Dropzone**: idle / drag-over (accent tint + border) / disabled states; click and Enter/Space open the file dialog; Browse button always present; accepted types as visible text.
+- **File queue rows**: type icon, mono name, size, own status badge, own progress bar, retry/remove, per-row error text.
+- **Provider chain**: ordered list, index chip, provider/model/key inputs, enable switch, status dot, up/down/remove.
+- **KPI cards**: label, 24px tabular value, optional delta chip (tone = meaning, not direction) and optional sparkline (only when the API returns them; omitted otherwise).
 
-### Tables
-- `width: 100%; border-collapse: collapse; font-family: IBM Plex Mono; font-size: 14px;`
-- `th, td` = `padding: 8px; border: 1px solid #e5e7eb / #374151;`; `text-align: left`;
-- `tr:nth-child(even)` = subtle bg tint (opacity 0.03 on light, 0.05 on dark).
+## 6. Motion
 
-### Modals
-- `fixed inset-0` backdrop `bg-black/30` (light) / `bg-white/10` (dark);
-- Centered `max-w-md` with `padding: 24px`; `border: 1px solid currentColor`; `border-radius: 0`;
-- Focus trap; `Esc` to close; motion = single fade-in (0.2s), no scatter.
+| Trigger | Spec |
+|---|---|
+| View switch | same-document View Transition: fade + 4–8px rise, 200ms; instant fallback |
+| Drawer | 320ms enter `--ease-enter`, 240ms exit `--ease-exit` |
+| Dialog / toast | `@starting-style` + `transition-behavior: allow-discrete`; keyframe fallback |
+| Button press | scale(.98), 80ms |
+| Skeleton | shimmer 1.4s linear |
+| KPI count-up | first load only, ≤600ms, skipped when unchanged or reduced motion |
+| Chart bars | grow once on first reveal (IntersectionObserver, unobserve after); stagger 30ms |
+| Hover | no transitions on cards; only color/background fast changes |
 
-### Loading Spinner
-- `size: 1em`; `stroke: currentColor`; `transition: transform .8s linear infinite`;
-- `transform: rotate(0deg)` → `rotate(360deg)`; `display: inline-block` when active.
+Only `transform` and `opacity` animate (sidebar rail width is the single deliberate exception). `prefers-reduced-motion: reduce` removes movement, count-up and bar growth; focus styles and progress bars stay functional; skeleton shimmer stops.
 
----
+## 7. Charts (hand-built SVG/CSS, zero dependencies)
 
-## 5. Motion (Zero Third-Party; Feedback-Only)
+- Geographic distribution → horizontal bars, top 8 + "Other" (muted), direct value labels.
+- Field completeness → horizontal progress bars sorted desc, direct % labels (<50 % flagged warning).
+- Reachability → donut ≤5 slices, center total, legend rows with values + %; slices focusable with `<title>`.
+- Extraction sources → horizontal bars by file type.
+- Rules: bars start at zero; no gridlines, no 3D; direct labels instead of legends (donut legend doubles as labels); title states the **takeaway** ("84 % of contacts have an email"), chart name is the subtitle; same category = same color everywhere (email = chart-1, phone = chart-2, both = chart-3, unreachable = muted); Okabe–Ito palette, dark-boosted; tooltips via native `<title>` + focusable rows with `aria-label`; "View as table" toggle + always-present visually-hidden table; re-render on theme change (`crm:themechange`) and container resize (ResizeObserver, debounced); friendly empty states; **nothing fabricated** — charts render only from fields the API actually returns (geo chart shows an honest empty state until a location field exists).
 
-| Trigger | Motion | Duration |
-|---------|--------|----------|
-| Page load | single orchestrated fade-in of header + main content | 200ms |
-| Button press | `scale(0.98)` while active | 50ms active |
-| Form submit | toast: “Saved” / “Error” (voice-line text) | 3s auto-dismiss |
-| Row expand (detail) | reveal detail pane from right | 200ms |
-| Reduced motion (prefers-reduced-motion) | all transitions → 0s; no spinners; skip animations | — |
+## 8. Accessibility (WCAG 2.2 AA)
 
-**Only ONE page-load orchestrated moment** (hero fades in, content rises). No hover-transitions-on-every-card (AI default). Feedback-only micro-interactions: button active-state scale, toast appear/dismiss.
+- Contrast: verified programmatically in both themes (see `tools/contrast_check.py` output): all text ≥ 5.5:1 (worst pair), non-text accent ≥ 3:1.
+- `:focus-visible` ring everywhere (`outline: 2px solid var(--focus-ring); offset 2px`); inputs get an additional halo.
+- 44px effective targets for primary actions and topbar/nav controls via invisible hit-area pseudos; table row buttons ≥ 24px (AA 2.5.8).
+- Real `<button>` / `<a href>` elements only; keyboard triage (J/K/↑/↓/A/R/D/Enter) guarded against text inputs and overlays; Ctrl+K palette with full listbox semantics; toasts `role="status"`; dialog/drawer with focus trap + return; `[hidden] { display: none !important }` guarantees state integrity.
+- Skip link, landmark regions, `aria-label`s on icon-only controls, `aria-sort` on sortable headers, `aria-expanded` on disclosure buttons, visually-hidden data tables for charts.
 
----
+## 9. Icons
 
-## 6. Icons — Self-Hosted Lucide
+One inline SVG sprite in `index.html` (~50 Lucide-style 24×24 stroke symbols, `currentColor`). Usage: `<svg class="icon"><use href="#i-users"/></svg>`. No icon font, no remote requests.
 
-Only icons needed for CRM (no decorative excess). SVGs inlined as data URIs or static `<svg>` in the single HTML shell. Essential set:
+## 10. Fonts & PyInstaller
 
-1. ` lucide-user ` — contact avatar
-2. ` lucide-mail ` — email attachment/icon
-3. ` lucide-folder ` — intake/scan
-4. ` lucide-calendar ` — created_at dates
-5. ` lucide-check ` — validation pass / success
-6. ` lucide-x-circle ` — error / validation failure
-7. ` lucide-clock ` — job progress / last run
-8. ` lucide-settings ` — provider/settings
-9. ` lucide-trash ` — delete / soft-delete
-10. ` lucide-share ` — export
-11. ` lucide-upload ` — intake upload
-12. ` lucide-download ` — export/download
-
-**No JS icon library** — SVGs are `<use href="...">` in a single `/assets/icons.svg` or inline `<symbol>` definitions. Zero third-party requests.
-
----
-
-## 7. Color Contrast Verification (≥4.5:1 AA)
-
-| Pair | Light | Dark |
-|------|-------|------|
-| `colorAccent` vs `colorBase` | 8.7:1 | 8.3:1 |
-| `colorSuccess` vs `colorBase` | 4.8:1 | 4.6:1 |
-| `colorWarning` vs `colorBase` | 4.5:1 | 4.3:1 (large text only) → small text uses `colorBase` text on warning bg |
-| `colorError` vs `colorBase` | 5.1:1 | 5.0:1 |
-| `colorMuted` vs `colorBase` | 3.3:1 (text) → use `colorBase` 90% opacity over images only | 3.5:1 (text) → same rule |
-| White text on `colorAccent` | 8.7:1 | 8.3:1 |
-
-All UI text meets WCAG 2.2 AA on both palettes. Large text (≥18px / ≥14px bold) meets ≥3:1.
-
----
-
-## 8. CSS Architecture — Specificity Guardrails
-
-- **Class naming:** `js-` prefixed for JS hooks; `data-` attributes for selectors in tests.
-- **Utility-first but scoped:** one `.css` file (`design-system.css`) with `:root` (light) and `[data-theme="dark"]` overrides; NO CSS-in-JS (no runtime deps).
-- **Specificity preventers:** 
-  - Avoid type-based selectors like `.section` or `.cta` cascading into other rules.
-  - Use single-level class: `.btn--primary`, `.btn--secondary`, `.btn--danger`.
-  - `form .input` never `.input` alone; `table .cell` never `.cell` alone.
-- **One CSS file** — PyInstaller bundles it as a static asset; no runtime generation.
-
----
-
-## 9. Accessibility — WCAG 2.2 AA (beyond color)
-
-- **Keyboard focus:** `outline: 2px solid colorAccent` + `outline-offset: 2px` on `:focus-visible`; focus order logical (DOM order).
-- **Touch target:** minimum 44px hit area (padding + font-size ensure this).
-- **Text resizing:** `font-size: 16px` base; `zoom` preserved; layout reflows gracefully.
-- **Error messages:** plain language, active voice, no apologies. `"Enter a valid email address"` not `"Invalid input"`.
-- **Empty states:** instructional text, CTA to act. `"No contacts yet. Add your first contact."` + primary CTA.
-- **ARIA:** `role="status"` for live regions (toast); `aria-live="polite"`; `aria-describedby` linking errors to inputs.
-
----
-
-## 10. PyInstaller Compatibility
-
-- All CSS in a single `design-system.css`; bundled as `--add-data "path/to/design-system.css:."` in PyInstaller spec.
-- All SVGs in `/assets/icons.svg`; bundled similarly.
-- No `import` side-effects; all paths relative to the single HTML entry point.
-- `openapi_url=None` keeps OpenAPI docs out; no external scripts.
-
----
+- `static/fonts/InterVariable.woff2` (352 KB), `IBMPlexMono-Regular/Medium/SemiBold.woff2` (~46 KB each), declared with `font-display: swap`; relative URLs in CSS so bundling paths just work.
+- Ship with `--add-data "static:static"` (or equivalent); no build step, no CDN, no npm at runtime.
