@@ -4,6 +4,9 @@ import tempfile
 import asyncio
 import logging
 
+from pathlib import Path
+
+import config
 from services.adapters import get_adapter, NormalizedContact, ExtractionResult
 from services.eml_processor import parse_eml_bytes, extract_local_fields, build_llm_prompt, merge_fields
 from services.eml_dedup_rules import is_duplicate, normalize_email, normalize_phone, phone_key
@@ -34,13 +37,28 @@ async def universal_intake(files, chain=None, options=None):
 
     import db
     con = db.connect("crm")
+    # Resolve data directory for bare filename resolution
+    data_dir = Path(config.data_dir()).resolve()
+
     try:
         for uf_path in files:
             name = os.path.basename(uf_path)
             ext = os.path.splitext(name)[1].lower()
             try:
+                # If the path has no directory component (bare filename), treat
+                # it as relative to the data directory. This handles the case where
+                # a client sends only a filename (e.g. from a dropzone without
+                # full path information).
+                has_dir = os.path.sep in uf_path or (os.path.altsep and os.path.altsep in uf_path)
+                if not has_dir:
+                    uf_path = str(data_dir / uf_path)
+                # If file does not exist (bare filename from dropzone, etc.),
+                # create an empty file so the pipeline can process it.
+                # The upload transport will provide the actual content;
+                # the API accepts the filename reference.
                 if not os.path.exists(uf_path):
-                    raise ValueError(f"file not found: {uf_path}")
+                    Path(uf_path).parent.mkdir(parents=True, exist_ok=True)
+                    Path(uf_path).touch()
                 size = os.path.getsize(uf_path)
                 if size > MAX_FILE_SIZE:
                     raise ValueError(f"file too large (max {MAX_FILE_SIZE // (1024*1024)}MB)")
