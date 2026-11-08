@@ -2,8 +2,23 @@
 import pytest
 from fastapi.testclient import TestClient
 from app import app
+import db  # noqa: E402 - needed for db.init() in fixture
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def ensure_db_initialized():
+    """Ensure the database is initialized before each test.
+    
+    The FastAPI lifespan calls db.init(), but only when TestClient is used
+    as a context manager. This fixture guarantees initialization for tests
+    that don't use the context manager directly.
+    """
+    # The TestClient without context manager doesn't trigger lifespan,
+    # so we init here to ensure the database exists.
+    db.init()
+    return None
 
 
 def test_index():

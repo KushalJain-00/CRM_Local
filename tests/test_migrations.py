@@ -5,6 +5,7 @@ All tests are hermetic: fixtures are built under tmp_path, the live DB
 migration on it (the D-030 gate in run_migrations is itself tested below).
 """
 import sqlite3
+import os
 import sys
 from pathlib import Path
 
@@ -428,7 +429,12 @@ def test_live_db_gate_blocks_without_override(tmp_path, monkeypatch, capsys):
 
 def test_live_db_file_is_canonical_home_path():
     """The gate target is the canonical production path, resolved at call time."""
-    expected = str((Path.home() / ".crm_local" / "crm.db").resolve())
+    if os.name == "nt":
+        # On Windows, the canonical location is APPDATA/CRM_Local (D-014, SEC-09).
+        expected = str((Path(os.environ.get("APPDATA") or Path.home()) / "CRM_Local" / "crm.db").resolve())
+    else:
+        # On POSIX, the canonical location is ~/.crm_local (D-014).
+        expected = str((Path.home() / ".crm_local" / "crm.db").resolve())
     assert db._live_db_file() == expected
 
 

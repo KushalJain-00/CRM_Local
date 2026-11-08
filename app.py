@@ -12,6 +12,7 @@ if getattr(sys, "frozen", False) and sys.stderr is None:
     sys.stdout = open(os.devnull, "w")
     sys.stderr = open(os.devnull, "w")
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -31,15 +32,41 @@ from api import system, settings, intake as api_intake, jobs, staged
 BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 STATIC = BASE / "static"
 
-app = FastAPI(title="CRM Local", openapi_url=None)
 
-# SEC-03 (D-028c): reject cross-site writes and DNS-rebinding reads.
-# First-invalid wins — a foreign Origin is rejected before Host is considered;
-# a non-loopback Host is rejected otherwise. Headers that are absent (curl,
-# TestClient) pass: only present-and-invalid values are rejected.
-# `testserver` is TestClient's default base_url; browsers cannot navigate to
-# that exact hostname, and any foreign page still fails the Origin check.
+# Canonical data directory: .crm_local on POSIX, APPDATA/CRM_Local on Windows.
+# Must match config.data_dir() and db.db_path() for cross-platform consistency.
+def data_dir() -> Path:
+    if os.name == "nt":
+        d = Path(os.environ.get("APPDATA") or Path.home()) / "CRM_Local"
+    else:
+        d = Path.home() / ".crm_local"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+# Loopback hosts for SEC-03 (D-028c): rejected before Host is considered.
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
+
+
+# Lifespan context manager replacing the deprecated on_event("startup") / on_event("shutdown").
+# Guarantees initialization runs before the first request and cleanup on shutdown.
+# Required for TestClient and uvicorn to properly exercise the startup path.
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> asyncGenerator[None, None]:
+    # Startup: clean up any stale WAL/SHM files, then initialize database, config,
+    # and optional watch pipeline
+    db_path = Path(config.db_path("crm"))
+    for sidecar in (db_path.parent / db_path.name + "-wal",
+                    db_path.parent / db_path.name + "-shm"):
+        if sidecar.exists():
+            sidecar.unlink()
+    db.init()
+    config.lock_down()
+    if config.load().get("watch"):
+        pipeline.start_watch()
+
+
+app = FastAPI(title="CRM Local", openapi_url=None, lifespan=_lifespan)  # type: ignore
 
 
 def _allowed_origins(host_header: str) -> set[str]:
@@ -156,13 +183,9 @@ def _merge_chain(incoming: list | None, stored: list | None) -> list:
     return merged
 
 
-# SEC-09 (D-028c): force config.json to 0600 at startup
-@app.on_event("startup")
-async def _startup() -> None:
-    db.init()
-    config.lock_down()
-    if config.load().get("watch"):
-        pipeline.start_watch()
+# SEC-09 (D-028c): force config.json to 0600 at startup is now handled by the
+# lifespan context manager below, which guarantees db.init() runs before the first
+# request and config.lock_down() runs at startup.
 
 
 # ── routes that STAY in app.py (composition root only) ────────────────────
