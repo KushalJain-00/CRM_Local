@@ -26,7 +26,7 @@ Name: "{group}\CRM Local"; Filename: "{app}\CRM_Local.exe"
 Name: "{autodesktop}\CRM Local"; Filename: "{app}\CRM_Local.exe"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a &desktop shortcut"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a &desktop shortcut"; Flags: checked
 
 [Run]
 Filename: "{app}\CRM_Local.exe"; Description: "Launch CRM Local"; Flags: nowait postinstall skipifsilent
