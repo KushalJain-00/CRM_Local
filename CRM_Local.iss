@@ -26,7 +26,8 @@ Name: "{group}\CRM Local"; Filename: "{app}\CRM_Local.exe"
 Name: "{autodesktop}\CRM Local"; Filename: "{app}\CRM_Local.exe"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a &desktop shortcut"; Flags: checked
+; Inno tasks are checked by default; removing the invalid "Flags: checked"
+Name: "desktopicon"; Description: "Create a &desktop shortcut"
 
 [Run]
 Filename: "{app}\CRM_Local.exe"; Description: "Launch CRM Local"; Flags: nowait postinstall skipifsilent
