@@ -124,16 +124,11 @@ def test_config_save_sets_0600(data_dir):
         os.umask(old_umask)
     if os.name == "nt":
         # On Windows, POSIX mode bits do not represent ACL permissions
-        # equivalently. The guarantee is that config.json inherits the
-        # profile directory's inherited ACLs (owner-full-control, others-read).
-        # Verify the file is not world-readable by checking that 'other'
-        # permission bits are not set, which is the closest equivalent
-        # check possible without native ACL API.
-        mode = stat.S_IMODE(config.config_path().stat().st_mode)
-        # On Windows, chmod 0o600 is a no-op; the file inherits profile ACLs.
-        # Assert that the file mode does not grant "other" read/write/execute,
-        # which would be the POSIX-equivalent security failure.
-        assert not (mode & 0o077), f"Windows: file has unexpected open permissions {oct(mode)}"
+        # equivalently. config._private() is intentionally a no-op on Windows
+        # (os.chmod is meaningless for Windows ACLs). The security guarantee
+        # is that config.json inherits the profile directory's inherited ACLs
+        # (owner-full-control). We only verify the file was written.
+        assert config.config_path().exists()
     else:
         # Linux/macOS: verify restrictive 0600 permissions.
         mode = stat.S_IMODE(config.config_path().stat().st_mode)

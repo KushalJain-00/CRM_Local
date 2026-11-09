@@ -12,6 +12,7 @@ if getattr(sys, "frozen", False) and sys.stderr is None:
     sys.stdout = open(os.devnull, "w")
     sys.stderr = open(os.devnull, "w")
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -52,18 +53,19 @@ _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
 # Guarantees initialization runs before the first request and cleanup on shutdown.
 # Required for TestClient and uvicorn to properly exercise the startup path.
 @asynccontextmanager
-async def _lifespan(app: FastAPI) -> asyncGenerator[None, None]:
+async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup: clean up any stale WAL/SHM files, then initialize database, config,
     # and optional watch pipeline
-    db_path = Path(config.db_path("crm"))
-    for sidecar in (db_path.parent / db_path.name + "-wal",
-                    db_path.parent / db_path.name + "-shm"):
+    _db_path = Path(config.db_path("crm"))
+    for suffix in ("-wal", "-shm"):
+        sidecar = _db_path.with_name(_db_path.name + suffix)
         if sidecar.exists():
             sidecar.unlink()
     db.init()
     config.lock_down()
     if config.load().get("watch"):
         pipeline.start_watch()
+    yield
 
 
 app = FastAPI(title="CRM Local", openapi_url=None, lifespan=_lifespan)  # type: ignore
