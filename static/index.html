@@ -411,10 +411,10 @@
               <table id="contactsTable">
                 <thead><tr>
                   <th class="c-check"><input type="checkbox" id="contactsCheckAll" aria-label="Select all contacts on this page"></th>
-                  <th class="c-name" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortContacts('name')">Name<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
-                  <th class="c-email" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortContacts('email_primary')">Email<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
-                  <th class="c-phone" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortContacts('phone_primary')">Phone<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
-                  <th class="c-company" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortContacts('company')">Company<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-name" scope="col" aria-sort="none"><button type="button" class="th-btn" data-sort="name" onclick="sortContacts('name')">Name<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-email" scope="col" aria-sort="none"><button type="button" class="th-btn" data-sort="email_primary" onclick="sortContacts('email_primary')">Email<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-phone" scope="col" aria-sort="none"><button type="button" class="th-btn" data-sort="phone_primary" onclick="sortContacts('phone_primary')">Phone<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-company" scope="col" aria-sort="none"><button type="button" class="th-btn" data-sort="company" onclick="sortContacts('company')">Company<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
                   <th class="c-actions"><span class="sr-only">Actions</span></th>
                 </tr></thead>
                 <tbody id="contactsBody"></tbody>
@@ -468,10 +468,10 @@
             <div class="table-container" data-density="comfortable">
               <table id="emailsTable">
                 <thead><tr>
-                  <th class="c-subject" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortEmails('subject')">Subject<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
-                  <th class="c-sender" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortEmails('sender_name')">Sender<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
-                  <th class="c-date" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortEmails('date')">Date<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
-                  <th class="c-count" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortEmails('contact_count')">Contacts<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-subject" scope="col" aria-sort="none"><button type="button" class="th-btn" data-sort="subject" onclick="sortEmails('subject')">Subject<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-sender" scope="col" aria-sort="none"><button type="button" class="th-btn" data-sort="sender_name" onclick="sortEmails('sender_name')">Sender<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-date" scope="col" aria-sort="none"><button type="button" class="th-btn" data-sort="date" onclick="sortEmails('date')">Date<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-count" scope="col" aria-sort="none"><button type="button" class="th-btn" data-sort="contact_count" onclick="sortEmails('contact_count')">Contacts<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
                 </tr></thead>
                 <tbody id="emailsBody"></tbody>
               </table>
@@ -505,49 +505,45 @@
           <div class="page-head">
             <div class="page-head-text">
               <h2>Analytics</h2>
-              <p class="page-sub">Shape of your contact database. Charts are drawn locally from your data.</p>
+              <p class="page-sub">Shape of your contact database, as plain data tables.</p>
             </div>
           </div>
-          <div class="chart-grid">
-            <section class="card chart-card">
+          <div class="analytics-grid">
+            <section class="card">
               <div class="card-head">
                 <div>
-                  <h3 id="chart-geo-takeaway">Geographic distribution</h3>
+                  <h3 id="analytics-geo-takeaway">Geographic distribution</h3>
                   <span class="card-sub">Geographic distribution</span>
                 </div>
-                <button type="button" class="btn-link" data-charttable="chart-geo">View as table</button>
               </div>
-              <div class="chart-host" id="chart-geo"></div>
+              <div class="analytics-host" id="analytics-geo"></div>
             </section>
-            <section class="card chart-card">
+            <section class="card">
               <div class="card-head">
                 <div>
-                  <h3 id="chart-completeness-takeaway">Field completeness</h3>
+                  <h3 id="analytics-completeness-takeaway">Field completeness</h3>
                   <span class="card-sub">Field completeness</span>
                 </div>
-                <button type="button" class="btn-link" data-charttable="chart-completeness">View as table</button>
               </div>
-              <div class="chart-host" id="chart-completeness"></div>
+              <div class="analytics-host" id="analytics-completeness"></div>
             </section>
-            <section class="card chart-card">
+            <section class="card">
               <div class="card-head">
                 <div>
-                  <h3 id="chart-reachability-takeaway">Reachability</h3>
+                  <h3 id="analytics-reachability-takeaway">Reachability</h3>
                   <span class="card-sub">Reachability</span>
                 </div>
-                <button type="button" class="btn-link" data-charttable="chart-reachability">View as table</button>
               </div>
-              <div class="chart-host" id="chart-reachability"></div>
+              <div class="analytics-host" id="analytics-reachability"></div>
             </section>
-            <section class="card chart-card">
+            <section class="card">
               <div class="card-head">
                 <div>
-                  <h3 id="chart-sources-takeaway">Extraction sources</h3>
+                  <h3 id="analytics-sources-takeaway">Extraction sources</h3>
                   <span class="card-sub">Extraction sources</span>
                 </div>
-                <button type="button" class="btn-link" data-charttable="chart-sources">View as table</button>
               </div>
-              <div class="chart-host" id="chart-sources"></div>
+              <div class="analytics-host" id="analytics-sources"></div>
             </section>
           </div>
         </div>
@@ -634,10 +630,10 @@
             <div class="table-container" data-density="comfortable">
               <table id="historyTable">
                 <thead><tr>
-                  <th class="c-file" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortHistory('file')">File<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-file" scope="col" aria-sort="none"><button type="button" class="th-btn" data-sort="file" onclick="sortHistory('file')">File<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
                   <th class="c-status" scope="col">Status</th>
-                  <th class="c-count" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortHistory('contacts_found')">Contacts<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
-                  <th class="c-date" scope="col" aria-sort="none"><button type="button" class="th-btn" onclick="sortHistory('processed_at')">Processed at<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-count" scope="col" aria-sort="none"><button type="button" class="th-btn" data-sort="contacts_found" onclick="sortHistory('contacts_found')">Contacts<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
+                  <th class="c-date" scope="col" aria-sort="none"><button type="button" class="th-btn" data-sort="processed_at" onclick="sortHistory('processed_at')">Processed at<svg class="icon sort-ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></th>
                 </tr></thead>
                 <tbody id="historyBody"></tbody>
               </table>

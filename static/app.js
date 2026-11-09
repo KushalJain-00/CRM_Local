@@ -5,7 +5,7 @@
 // window.CRM_API_BASE behavior, element IDs and inline-handler function names.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const API_BASE = (window.CRM_API_BASE || '/api').replace(/\/$/, '');
+const API_BASE = (window.CRM_API_BASE !== undefined ? window.CRM_API_BASE : '').replace(/\/$/, '');
 
 const REDUCED = window.matchMedia ? matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
 const $ = (sel, root) => (root || document).querySelector(sel);
@@ -107,7 +107,10 @@ function debounce(fn, ms) {
 }
 
 function csvCell(v) {
-    const s = v === null || v === undefined ? '' : String(v);
+    let s = v === null || v === undefined ? '' : String(v);
+    // SEC: sanitize spreadsheet formula triggers (=, +, -, @, tab, CR)
+    // but preserve legitimate negative numbers
+    if (/^[=+@\t\r]/.test(s) || (/^-/.test(s) && isNaN(Number(s)))) s = "'" + s;
     return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
@@ -759,11 +762,9 @@ async function retryFile(i) {
     q.status = 'processing'; q.error = ''; q.progress = 0;
     renderFileQueue();
     try {
-        const resp = await api('/api/intake', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ paths: [q.file.name] }),
-        });
+        const fd = new FormData();
+        fd.append('files', q.file);
+        const resp = await apiFormData('/api/intake', fd);
         const r = (resp.results && resp.results[0]) || {};
         q.status = r.status === 'OK' ? 'done' : 'failed';
         q.error = r.error || '';
@@ -796,12 +797,9 @@ async function startExtraction() {
     renderFileQueue();
 
     try {
-        const paths = valid.map(q => q.file.name);
-        const resp = await api('/api/intake', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ paths: paths }),
-        });
+        const fd = new FormData();
+        valid.forEach(q => fd.append('files', q.file));
+        const resp = await apiFormData('/api/intake', fd);
 
         const respResults = (resp && resp.results) || [];
         let okCount = 0, failCount = 0;
@@ -836,7 +834,7 @@ async function startExtraction() {
         valid.forEach(q => { q.status = 'failed'; q.error = e.message; });
         results.innerHTML = `<div class="result-item error">
             <svg class="icon" aria-hidden="true"><use href="#i-x-circle"/></svg>
-            <span><strong>Extraction failed.</strong> ${esc(e.message)} — make sure the local service is running and the files still exist, then try again.</span>
+            <span><strong>Extraction failed.</strong> ${esc(e.message)} — check that the local service is running, then try again.</span>
         </div>`;
         renderFileQueue();
     } finally {
@@ -954,8 +952,8 @@ function updateSortUI(tableId, activeField, dir) {
     $$('th[aria-sort]', table).forEach(th => {
         const btn = th.querySelector('.th-btn');
         if (!btn) return;
-        const field = (btn.getAttribute('onclick') || '').match(/'([^']+)'/);
-        const isIt = field && field[1] === activeField;
+        const field = btn.getAttribute('data-sort');
+        const isIt = field === activeField;
         th.setAttribute('aria-sort', isIt ? (dir === 'asc' ? 'ascending' : 'descending') : 'none');
     });
 }
@@ -1753,7 +1751,7 @@ function renderSettings(settings) {
                 <input type="text" value="${esc(entry.model || '')}" placeholder="Model"
                        aria-label="Provider ${i + 1} model"
                        onchange="updateProviderSetting(${i}, 'model', this.value)">
-                <input type="password" value="${entry.api_key_set ? '********' : (entry.api_key || '')}" placeholder="API key"
+                <input type="password" value="${entry.api_key_set ? '********' : esc(entry.api_key || '')}" placeholder="API key"
                        aria-label="Provider ${i + 1} API key" autocomplete="off"
                        onchange="updateProviderSetting(${i}, 'api_key', this.value)">
             </div>
@@ -1853,168 +1851,11 @@ async function saveSettings() {
     }
 }
 
-// ── Analytics (hand-built SVG/CSS charts, zero dependencies) ────────────────
-
-const ChartCache = {};   // chart id -> {render: fn}
-let chartIO = null;      // IntersectionObserver for one-shot bar growth
-let chartRO = null;      // ResizeObserver for container-aware re-render
-
-function chartPalette() {
-    const cs = getComputedStyle(document.documentElement);
-    const get = (n) => cs.getPropertyValue(n).trim() || '#0072B2';
-    return [get('--chart-1'), get('--chart-2'), get('--chart-3'), get('--chart-4'), get('--chart-5'), get('--chart-6')];
-}
-
-function chartGrowthObserver() {
-    if (chartIO || typeof IntersectionObserver !== 'function') return chartIO;
-    chartIO = new IntersectionObserver((entries) => {
-        entries.forEach(en => {
-            if (en.isIntersecting) {
-                en.target.classList.add('is-grown');
-                chartIO.unobserve(en.target);
-            }
-        });
-    }, { threshold: 0.25 });
-    return chartIO;
-}
-
-function watchChartContainer(id) {
-    if (chartRO || typeof ResizeObserver !== 'function') return;
-    const host = document.getElementById(id);
-    if (!host) return;
-    chartRO = new ResizeObserver(debounce(() => {
-        const entry = ChartCache[id];
-        if (entry && entry.lastData) { entry.render(entry.lastData); growChart(id); }
-    }, 150));
-    chartRO.observe(host);
-}
-
-function growChart(id) {
-    const host = document.getElementById(id);
-    if (!host) return;
-    const chart = host.querySelector('.chart');
-    if (!chart) return;
-    if (REDUCED.matches) { chart.classList.add('is-grown'); return; }
-    const io = chartGrowthObserver();
-    if (io) io.observe(chart);
-    else chart.classList.add('is-grown');
-}
+// ── Analytics (plain data tables only — D-012: no charts or graphs) ──────────
 
 function setTakeaway(id, text) {
-    const el = document.getElementById(id + '-takeaway');
+    const el = document.getElementById(id);
     if (el) el.textContent = text;
-}
-
-function chartEmptyHTML(host, title, hint, icon) {
-    host.innerHTML = `<div class="empty"><span class="empty-ic"><svg class="icon" aria-hidden="true"><use href="#${icon || 'i-chart'}"/></svg></span>
-        <strong>${esc(title)}</strong><p>${esc(hint)}</p></div>`;
-}
-
-function chartTableHTML(id, headers, rows) {
-    return `<table class="chart-table sr-only" aria-label="Data table for ${esc(id)}">
-        <thead><tr>${headers.map(h => `<th scope="col">${esc(h)}</th>`).join('')}</tr></thead>
-        <tbody>${rows.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody>
-    </table>`;
-}
-
-function renderBarChart(id, data, opts) {
-    opts = opts || {};
-    const host = document.getElementById(id);
-    if (!host) return;
-    const clean = (data || []).filter(d => d && d.label != null && Number(d.value) > 0);
-    if (!clean.length) {
-        setTakeaway(id, opts.emptyTitle || 'No data yet');
-        chartEmptyHTML(host, 'No data yet', opts.emptyHint || 'This chart fills in as contacts are extracted.', opts.emptyIcon);
-        ChartCache[id] = { render: (d) => renderBarChart(id, d, opts), lastData: null };
-        return;
-    }
-    const max = Math.max(...clean.map(d => Number(d.value)));
-    const total = clean.reduce((a, d) => a + Number(d.value), 0);
-    const tableRows = clean.map(d => [d.label, String(d.value), (Number(d.value) / total * 100).toFixed(1) + '%']);
-    host.innerHTML = `<div class="chart" role="img" aria-label="${esc(opts.aria || opts.title)}">
-        ${clean.map((d, i) => {
-            const pct = (Number(d.value) / max * 100).toFixed(1);
-            const share = (Number(d.value) / total * 100).toFixed(0);
-            return `<div class="chart-row ${d.muted ? 'is-muted' : ''}" tabindex="0" aria-label="${esc(d.label)}: ${fmtInt(d.value)} (${share}%)">
-                <span class="chart-label" title="${esc(d.label)}">${esc(d.label)}</span>
-                <span class="chart-track"><span class="chart-fill" style="--w:${pct}%;--i:${i}"></span></span>
-                <span class="chart-value">${fmtInt(d.value)}</span>
-            </div>`;
-        }).join('')}
-    </div>` + chartTableHTML(id, ['Category', 'Count', 'Share'], tableRows);
-    ChartCache[id] = { render: (d) => renderBarChart(id, d, opts), lastData: data };
-    growChart(id);
-    watchChartContainer(id);
-}
-
-function renderDonutChart(id, data, opts) {
-    opts = opts || {};
-    const host = document.getElementById(id);
-    if (!host) return;
-    const clean = (data || []).filter(d => Number(d.value) > 0).slice(0, 5);
-    if (!clean.length) {
-        setTakeaway(id, opts.emptyTitle || 'No data yet');
-        chartEmptyHTML(host, 'No data yet', opts.emptyHint || 'This chart fills in as contacts are extracted.', opts.emptyIcon);
-        ChartCache[id] = { render: (d) => renderDonutChart(id, d, opts), lastData: null };
-        return;
-    }
-    const total = clean.reduce((a, d) => a + Number(d.value), 0);
-    const C = 2 * Math.PI * 56;
-    let acc = 0;
-    const palette = chartPalette();
-    const slices = clean.map((d, i) => {
-        const frac = Number(d.value) / total;
-        const dash = (frac * C).toFixed(2);
-        const offset = (-acc * C).toFixed(2);
-        acc += frac;
-        const color = d.color || palette[i % palette.length];
-        return `<circle class="donut-slice" cx="74" cy="74" r="56" fill="none" stroke="${color}" stroke-width="18"
-            stroke-dasharray="${dash} ${(C - dash).toFixed(2)}" stroke-dashoffset="${offset}" tabindex="0"
-            role="img" aria-label="${esc(d.label)}: ${fmtInt(d.value)} (${Math.round(frac * 100)}%)">
-            <title>${esc(d.label)}: ${fmtInt(d.value)} (${Math.round(frac * 100)}%)</title></circle>`;
-    }).join('');
-    const legend = clean.map((d, i) => {
-        const color = d.color || palette[i % palette.length];
-        return `<div class="donut-legend-row">
-            <span class="donut-swatch" style="background:${color}"></span>
-            <span class="donut-legend-label" title="${esc(d.label)}">${esc(d.label)}</span>
-            <span class="donut-legend-value">${fmtInt(d.value)} · ${Math.round(Number(d.value) / total * 100)}%</span>
-        </div>`;
-    }).join('');
-    const tableRows = clean.map(d => [d.label, String(d.value), Math.round(Number(d.value) / total * 100) + '%']);
-    host.innerHTML = `<div class="chart-donut" role="img" aria-label="${esc(opts.aria || opts.title)}">
-        <div class="donut-wrap">
-            <svg viewBox="0 0 148 148" aria-hidden="true" style="transform:rotate(-90deg)">${slices}</svg>
-            <div class="donut-center"><span class="donut-total num">${fmtInt(total)}</span><span class="donut-caption">${esc(opts.centerCaption || 'total')}</span></div>
-        </div>
-        <div class="donut-legend">${legend}</div>
-    </div>` + chartTableHTML(id, ['Category', 'Count', 'Share'], tableRows);
-    ChartCache[id] = { render: (d) => renderDonutChart(id, d, opts), lastData: data };
-}
-
-function renderProgressChart(id, data, opts) {
-    opts = opts || {};
-    const host = document.getElementById(id);
-    if (!host) return;
-    const clean = (data || []).filter(d => d && d.label != null);
-    if (!clean.length) {
-        setTakeaway(id, opts.emptyTitle || 'No data yet');
-        chartEmptyHTML(host, 'No data yet', opts.emptyHint || 'This chart fills in as contacts are extracted.', opts.emptyIcon);
-        ChartCache[id] = { render: (d) => renderProgressChart(id, d, opts), lastData: null };
-        return;
-    }
-    const tableRows = clean.map(d => [d.label, d.value + '%']);
-    host.innerHTML = `<div class="chart" role="img" aria-label="${esc(opts.aria || opts.title)}">
-        ${clean.map((d, i) => `
-            <div class="chart-row" tabindex="0" aria-label="${esc(d.label)}: ${d.value}% complete">
-                <span class="chart-label" title="${esc(d.label)}">${esc(d.label)}</span>
-                <span class="chart-track"><span class="chart-fill" style="--w:${d.value}%;--i:${i}"></span></span>
-                <span class="chart-value" style="${d.value < 50 ? 'color:var(--warning-text)' : ''}">${d.value}%</span>
-            </div>`).join('')}
-    </div>` + chartTableHTML(id, ['Field', 'Filled'], tableRows);
-    ChartCache[id] = { render: (d) => renderProgressChart(id, d, opts), lastData: data };
-    growChart(id);
-    watchChartContainer(id);
 }
 
 function tallyBy(rows, key) {
@@ -2028,13 +1869,30 @@ function tallyBy(rows, key) {
     return Array.from(map, ([label, value]) => ({ label, value }));
 }
 
-async function loadAnalytics() {
-    ['chart-geo', 'chart-completeness', 'chart-reachability', 'chart-sources'].forEach(id => {
-        const host = document.getElementById(id);
-        if (host) host.innerHTML = '<div class="chart">' + Array.from({ length: 5 }, (_, i) =>
-            `<div class="chart-row"><span class="skel" style="width:70%"></span><span class="skel" style="width:100%"></span><span class="skel" style="width:32px"></span></div>`).join('') + '</div>';
-    });
+function renderAnalyticsTable(hostId, headers, rows, empty) {
+    const host = document.getElementById(hostId);
+    if (!host) return;
+    if (!rows.length) {
+        const icon = empty && empty.icon || 'i-chart';
+        host.innerHTML = `<div class="empty"><span class="empty-ic"><svg class="icon" aria-hidden="true"><use href="#${icon}"/></svg></span>
+            <strong>${esc((empty && empty.title) || 'No data yet')}</strong><p>${esc((empty && empty.hint) || 'This table fills in as contacts are extracted.')}</p></div>`;
+        return;
+    }
+    host.innerHTML = `<table class="analytics-table">
+        <thead><tr>${headers.map(h => `<th scope="col">${esc(h)}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>`;
+}
 
+function setAnalyticsSub(takeawayId, text) {
+    const el = document.getElementById(takeawayId);
+    if (!el) return;
+    const card = el.closest('.card');
+    const sub = card && card.querySelector('.card-sub');
+    if (sub) sub.textContent = text;
+}
+
+async function loadAnalytics() {
     let rows = [];
     try {
         const d = await api('/api/contacts?which=crm&page=1&size=1000');
@@ -2047,22 +1905,22 @@ async function loadAnalytics() {
         jobs = (j && j.results) || [];
     } catch (e) { jobs = []; }
 
-    // Geographic distribution — rendered only if the data actually carries a
-    // geographic field; otherwise an honest empty state (nothing fabricated).
+    // Geographic distribution — from real location fields only; otherwise an
+    // honest empty state (nothing fabricated).
     const geoKey = ['country', 'country_code', 'geo', 'region', 'state', 'city']
         .find(k => rows.some(r => r[k] !== undefined && r[k] !== null && r[k] !== ''));
     if (geoKey) {
-        let geo = tallyBy(rows, geoKey).sort((a, b) => b.value - a.value);
-        if (geo.length > 8) {
-            const rest = geo.slice(8).reduce((a, d) => a + d.value, 0);
-            geo = geo.slice(0, 8).concat([{ label: 'Other', value: rest, muted: true }]);
-        }
-        const top = geo[0];
-        setTakeaway('chart-geo', `${esc(top.label)} leads with ${Math.round(top.value / Math.max(1, rows.length) * 100)}% of contacts`);
-        renderBarChart('chart-geo', geo, { aria: 'Geographic distribution, top ' + (geo.length - 1) + ' plus other' });
+        const geoRows = tallyBy(rows, geoKey).sort((a, b) => b.value - a.value);
+        const total = geoRows.reduce((a, d) => a + d.value, 0);
+        const top = geoRows[0];
+        setTakeaway('analytics-geo-takeaway', `${top.label} leads with ${Math.round(top.value / Math.max(1, rows.length) * 100)}% of contacts`);
+        renderAnalyticsTable('analytics-geo',
+            [geoKey[0].toUpperCase() + geoKey.slice(1), 'Contacts', 'Share'],
+            geoRows.map(d => [d.label, fmtInt(d.value), Math.round(d.value / total * 100) + '%']));
     } else {
-        setTakeaway('chart-geo', 'No geographic data available yet');
-        renderBarChart('chart-geo', [], { emptyTitle: 'Waiting for location fields', emptyHint: 'Your contacts do not include a country or region field, so there is nothing to chart yet.', emptyIcon: 'i-globe' });
+        setTakeaway('analytics-geo-takeaway', 'No geographic data available yet');
+        renderAnalyticsTable('analytics-geo', ['Category', 'Contacts', 'Share'], [],
+            { title: 'Waiting for location fields', hint: 'Your contacts do not include a country or region field, so there is nothing to summarize yet.', icon: 'i-globe' });
     }
 
     // Field completeness — real fill rates over the fetched contacts.
@@ -2078,13 +1936,15 @@ async function loadAnalytics() {
     })).sort((a, b) => b.value - a.value);
     if (rows.length) {
         const best = completeness[0];
-        setTakeaway('chart-completeness', `${best.value}% of contacts have a ${best.label.toLowerCase()}`);
-        setSub('chart-completeness', `Field completeness · ${fmtInt(rows.length)} contacts sampled`);
-        renderProgressChart('chart-completeness', completeness, { aria: 'Field completeness percentages' });
+        setTakeaway('analytics-completeness-takeaway', `${best.value}% of contacts have a ${best.label.toLowerCase()}`);
+        setAnalyticsSub('analytics-completeness-takeaway', `Field completeness · ${fmtInt(rows.length)} contacts sampled`);
+        renderAnalyticsTable('analytics-completeness', ['Field', 'Filled'],
+            completeness.map(d => [d.label, d.value + '%']));
     } else {
-        setTakeaway('chart-completeness', 'No contacts to measure yet');
-        setSub('chart-completeness', 'Field completeness');
-        renderProgressChart('chart-completeness', [], { emptyTitle: 'Waiting for contacts', emptyHint: 'Extract a file to see field completeness.', emptyIcon: 'i-gauge' });
+        setTakeaway('analytics-completeness-takeaway', 'No contacts to measure yet');
+        setAnalyticsSub('analytics-completeness-takeaway', 'Field completeness');
+        renderAnalyticsTable('analytics-completeness', ['Field', 'Filled'], [],
+            { title: 'Waiting for contacts', hint: 'Extract a file to see field completeness.', icon: 'i-gauge' });
     }
 
     // Reachability — share of contacts reachable by email and/or phone.
@@ -2094,49 +1954,36 @@ async function loadAnalytics() {
         const phoneOnly = rows.filter(r => !(r.email_primary || r.email) && r.phone_primary).length;
         const none = rows.length - both - emailOnly - phoneOnly;
         const reachablePct = Math.round((both + emailOnly + phoneOnly) / rows.length * 100);
-        setTakeaway('chart-reachability', `${reachablePct}% of contacts are reachable`);
-        setSub('chart-reachability', 'Reachability');
-        renderDonutChart('chart-reachability', [
-            { label: 'Email & phone', value: both, color: 'var(--chart-3)' },
-            { label: 'Email only', value: emailOnly, color: 'var(--chart-1)' },
-            { label: 'Phone only', value: phoneOnly, color: 'var(--chart-2)' },
-            { label: 'Unreachable', value: none, color: 'var(--text-faint)' },
-        ], { centerCaption: 'contacts' });
+        setTakeaway('analytics-reachability-takeaway', `${reachablePct}% of contacts are reachable`);
+        setAnalyticsSub('analytics-reachability-takeaway', 'Reachability');
+        renderAnalyticsTable('analytics-reachability', ['Reachability', 'Contacts', 'Share'], [
+            ['Email & phone', fmtInt(both), Math.round(both / rows.length * 100) + '%'],
+            ['Email only', fmtInt(emailOnly), Math.round(emailOnly / rows.length * 100) + '%'],
+            ['Phone only', fmtInt(phoneOnly), Math.round(phoneOnly / rows.length * 100) + '%'],
+            ['Unreachable', fmtInt(none), Math.round(none / rows.length * 100) + '%'],
+        ]);
     } else {
-        setTakeaway('chart-reachability', 'No contacts to measure yet');
-        setSub('chart-reachability', 'Reachability');
-        renderDonutChart('chart-reachability', [], { emptyTitle: 'Waiting for contacts', emptyHint: 'Reachability shows how many contacts have an email or phone.', emptyIcon: 'i-users' });
+        setTakeaway('analytics-reachability-takeaway', 'No contacts to measure yet');
+        setAnalyticsSub('analytics-reachability-takeaway', 'Reachability');
+        renderAnalyticsTable('analytics-reachability', ['Reachability', 'Contacts', 'Share'], [],
+            { title: 'Waiting for contacts', hint: 'Reachability shows how many contacts have an email or phone.', icon: 'i-users' });
     }
 
     // Extraction sources — file types processed, from real history rows.
     if (jobs.length) {
         const src = tallyBy(jobs.map(j => ({ ext: (String(j.file || '').match(/\.([a-z0-9]+)$/i) || [,'other'])[1].toLowerCase() })), 'ext')
             .sort((a, b) => b.value - a.value);
-        const top = src[0];
-        setTakeaway('chart-sources', `${top.label.toUpperCase()} files dominate extractions`);
-        setSub('chart-sources', 'Extraction sources · ' + fmtInt(jobs.length) + ' files');
-        renderBarChart('chart-sources', src.map(d => ({ label: '.' + d.label, value: d.value })), { aria: 'Extraction sources by file type' });
+        setTakeaway('analytics-sources-takeaway', `${src[0].label.toUpperCase()} files dominate extractions`);
+        setAnalyticsSub('analytics-sources-takeaway', 'Extraction sources · ' + fmtInt(jobs.length) + ' files');
+        const total = src.reduce((a, d) => a + d.value, 0);
+        renderAnalyticsTable('analytics-sources', ['File type', 'Files', 'Share'],
+            src.map(d => ['.' + d.label, fmtInt(d.value), Math.round(d.value / total * 100) + '%']));
     } else {
-        setTakeaway('chart-sources', 'No extractions yet');
-        setSub('chart-sources', 'Extraction sources');
-        renderBarChart('chart-sources', [], { emptyTitle: 'Waiting for extractions', emptyHint: 'File types appear here after your first extraction.', emptyIcon: 'i-layers' });
+        setTakeaway('analytics-sources-takeaway', 'No extractions yet');
+        setAnalyticsSub('analytics-sources-takeaway', 'Extraction sources');
+        renderAnalyticsTable('analytics-sources', ['File type', 'Files', 'Share'], [],
+            { title: 'Waiting for extractions', hint: 'File types appear here after your first extraction.', icon: 'i-layers' });
     }
-}
-
-function setSub(id, text) {
-    const host = document.getElementById(id);
-    if (!host) return;
-    const card = host.closest('.chart-card');
-    if (!card) return;
-    const sub = card.querySelector('.card-sub');
-    if (sub) sub.textContent = text;
-}
-
-function rerenderCharts() {
-    Object.keys(ChartCache).forEach(id => {
-        const entry = ChartCache[id];
-        if (entry && entry.lastData) { entry.render(entry.lastData); growChart(id); }
-    });
 }
 
 // ── Density toggle (comfortable / compact) ───────────────────────────────────
@@ -2272,6 +2119,10 @@ function paletteSearchContacts(q) {
 }
 
 function openPalette() {
+    // Never open the palette under an open native modal <dialog> (e.g. the
+    // confirm dialog) — focus is trapped by the modal and the state would
+    // desync. Re-opening after the dialog closes is always possible via Ctrl+K.
+    if (document.querySelector('dialog[open]')) return;
     const p = document.getElementById('palette');
     if (!p) return;
     palette.open = true;
@@ -2296,6 +2147,11 @@ function initPalette() {
     palette.list = document.getElementById('paletteList');
     if (!palette.el || !palette.input || !palette.list) return;
     paletteBuildStatic();
+    // Native <dialog> dismissed (Esc, backdrop close, or programmatic close)
+    // while the palette is open → palette state must follow the same close
+    // event, not a stale in-memory flag.
+    const confirmDlg = document.getElementById('confirmDialog');
+    if (confirmDlg) confirmDlg.addEventListener('close', () => { if (palette.open) paletteClose(); });
     palette.input.addEventListener('input', () => {
         palette.active = 0;
         paletteRender();
@@ -2447,17 +2303,6 @@ document.addEventListener('DOMContentLoaded', () => {
         $$('.settings-link').forEach(x => x.classList.remove('is-active'));
         a.classList.add('is-active');
     }));
-
-    // "View as table" toggles on chart cards
-    $$('[data-charttable]').forEach(btn => btn.addEventListener('click', () => {
-        const card = btn.closest('.chart-card');
-        if (!card) return;
-        const on = card.classList.toggle('is-table');
-        btn.textContent = on ? 'View as chart' : 'View as table';
-    }));
-
-    // Re-render charts when the theme changes (colors are theme-specific)
-    window.addEventListener('crm:themechange', rerenderCharts);
 
     // Crossing the 900px breakpoint resets the off-canvas sidebar state
     if (window.matchMedia) {

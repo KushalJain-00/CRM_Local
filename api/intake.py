@@ -16,6 +16,41 @@ MAX_SIZE_PER_FILE_MB = 10
 MAX_SIZE_TOTAL_MB = 100
 
 
+def _spool_uploads(upload_files):
+    """Write UploadFile bytes to spool files under the data directory.
+
+    The extraction pipeline is path-based; multipart uploads are the byte
+    channel (SEC-05 / D-009). Basename-sanitized names + a pid-unique prefix
+    prevent clobbering and path traversal; the caller MUST unspool in a
+    finally block.
+    """
+    upload_dir = Path(config.data_dir()) / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    spooled, sizes = [], []
+    for i, f in enumerate(upload_files):
+        base = os.path.basename(f.filename or f"upload_{i}.bin")
+        if not base or base in {".", ".."}:
+            base = f"upload_{i}.bin"
+        dest = upload_dir / f"{os.getpid()}~{i}~{base}"
+        with open(dest, "wb") as out:
+            out.write(f.file.read())
+        size = dest.stat().st_size
+        if size > MAX_SIZE_PER_FILE_MB * 1024 * 1024:
+            os.remove(dest)
+            raise HTTPException(413, f"File too large (max {MAX_SIZE_PER_FILE_MB} MB per file)")
+        spooled.append(str(dest))
+        sizes.append(size)
+    return spooled, sizes
+
+
+def _unspool(spooled):
+    for p in spooled:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
 # Root-level intake module (services package partially unavailable until
 # __init__.py is populated); import directly from the project top-level intake.
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
@@ -39,16 +74,8 @@ async def universal_intake(
     if len(incoming) > MAX_FILES:
         raise HTTPException(400, f"Too many files (max {MAX_FILES})")
 
-    # size caps
-    total_bytes = 0
-    for f in incoming:
-        # FastAPI UploadFile .size may be None until read; guard safely
-        sz = getattr(f, "size", None)
-        if sz is None:
-            # read a little to estimate; for real usage size is set by the client
-            pass
-        total_bytes += (sz or 0)
-
+    # size caps (per-file from UploadFile.size when known; total below)
+    total_bytes = sum((getattr(f, "size", None) or 0) for f in incoming)
     if total_bytes > MAX_SIZE_TOTAL_MB * 1024 * 1024:
         raise HTTPException(413, f"Payload too large (max {MAX_SIZE_TOTAL_MB} MB)")
 
@@ -65,5 +92,19 @@ async def universal_intake(
         resolved = Path(p).resolve()
         if not (str(resolved).startswith(str(data_dir) + os.sep) or str(resolved) == str(data_dir)):
             raise HTTPException(400, f"path outside allowed data directory: {p}")
-    result = await _universal_intake(incoming)
+
+    # Multipart uploads: spool bytes → path-based pipeline → guaranteed cleanup
+    if files:
+        spooled = None
+        try:
+            spooled, spool_sizes = _spool_uploads(files)
+            spool_total = sum(spool_sizes)
+            if spool_total > MAX_SIZE_TOTAL_MB * 1024 * 1024:
+                raise HTTPException(413, f"Payload too large (max {MAX_SIZE_TOTAL_MB} MB)")
+            result = await _universal_intake(spooled)
+        finally:
+            if spooled:
+                _unspool(spooled)
+        return result
+    result = await _universal_intake(paths or [])
     return result

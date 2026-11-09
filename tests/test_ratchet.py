@@ -144,11 +144,10 @@ def test_gitignore_covers_backups():
 
 
 # --- BUG-D029: undefined frontend handlers ---------------------------------
-# Static-content tests: these functions are referenced by inline handlers in
-# index.html and defined nowhere; browser JS cannot be unit-tested here, so the
-# reference-vs-definition mismatch in the static assets is the pinnable defect.
-
-
+# PR #1 remediation removed both xfail(strict=True) markers: filterContacts()
+# and exportContacts() are now defined in static/app.js (see the behavioral
+# FLIPPED tests at the bottom of this file). The reference-vs-definition
+# mismatch is gone, so the defect pin no longer applies.
 # ── P0-E: intake security regression tests ─────────────────────────────────
 # These tests verify path containment, empty file handling, and extraction
 # guards at the API and function levels.
@@ -223,17 +222,9 @@ def test_intake_csv_adapter_with_real_file(data_dir, tmp_path):
     assert body["results"][0]["status"] == "OK"
 
 
-@pytest.mark.xfail(
-    reason="BUG-D029-filterContacts: index.html calls filterContacts() but static/app.js defines no such function",
-    strict=True,
-)
 def test_filter_contacts_handler_defined():
     assert _handler_defined("filterContacts")
 
 
-@pytest.mark.xfail(
-    reason="BUG-D029-exportContacts: index.html calls exportContacts() but static/app.js defines no such function",
-    strict=True,
-)
 def test_export_contacts_handler_defined():
     assert _handler_defined("exportContacts")
