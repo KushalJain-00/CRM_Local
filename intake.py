@@ -93,9 +93,14 @@ async def universal_intake(files, chain=None, options=None):
                     from services.eml_processor import parse_eml_bytes, extract_local_fields, build_llm_prompt, merge_fields
                     parsed = parse_eml_bytes(raw_eml, name)
                     local = extract_local_fields(parsed)
-                    ai = None
-                    if chain:
-                        ai, label = await llm.extract(chain, build_llm_prompt(parsed))
+                ai = None
+                if chain:
+                    import config as _config
+                    from services.prompts import store as _prompts
+                    ai, label = await llm.extract(
+                        chain, build_llm_prompt(parsed),
+                        system=_prompts.text("eml"),
+                        reliability=_config.load().get("reliability"))
                     merged = merge_fields(local, ai)
                     for nc in result.contacts:
                         nc.name = merged.get("name") or nc.name

@@ -21,7 +21,7 @@ def test_parse_json_strips_code_fences():
 def test_chain_fails_over_to_next_provider(monkeypatch):
     calls = []
 
-    async def fake_post(url, headers, payload):
+    async def fake_post(url, headers, payload, timeout=None):
         calls.append(url)
         if "openrouter" in url:
             raise RuntimeError("HTTP 429: rate limited")
@@ -41,7 +41,7 @@ def test_chain_fails_over_to_next_provider(monkeypatch):
 
 
 def test_disabled_entries_are_skipped(monkeypatch):
-    async def fake_post(url, headers, payload):
+    async def fake_post(url, headers, payload, timeout=None):
         return FakeResponse({"choices": [{"message": {"content": '{"name":"X"}'}}]})
 
     monkeypatch.setattr(llm, "_post", fake_post)
@@ -63,7 +63,7 @@ def test_empty_chain_reports_local_only():
 def test_ollama_uses_local_chat_endpoint(monkeypatch):
     seen = {}
 
-    async def fake_post(url, headers, payload):
+    async def fake_post(url, headers, payload, timeout=None):
         seen["url"] = url
         seen["payload"] = payload
         return FakeResponse({"message": {"content": '{"name":"Local"}'}})

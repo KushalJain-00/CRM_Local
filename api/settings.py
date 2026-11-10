@@ -8,12 +8,15 @@ from fastapi import APIRouter, HTTPException
 
 from pydantic import BaseModel
 
+import config
 router = APIRouter()
 
 
 class ProviderIn(BaseModel):
     id: Optional[str] = None
+    provider: Optional[str] = None
     model: str
+    api_key: Optional[str] = None
     base_url: str = ""
     enabled: bool = True
 
@@ -63,6 +66,10 @@ async def update_settings(body: dict):
     import config
     cfg = config.load()
     updates = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else body
+    if "reliability" in updates:
+        updates["reliability"] = _clamp_reliability(updates.pop("reliability") or {})
+    # prompts are edited only via /api/prompts — never through this surface
+    updates.pop("prompts", None)
     if "chain" in updates:
         # simple merge: new values replace stored by id, keep old ones
         # first, ensure all stored entries have an 'id' (legacy compat)
@@ -204,3 +211,196 @@ async def set_mode(body: ModeIn):
     cfg["import_policy"] = body.import_policy
     config.save(cfg)
     return {"ok": True, "mode": body.mode, "import_policy": body.import_policy}
+
+
+# ── Provider catalog, model discovery & connection testing ──────────────────
+
+RELIABILITY_FIELDS = {
+    "timeout_s": (5.0, 600.0),
+    "attempts": (1, 6),
+    "backoff_initial_s": (0.0, 60.0),
+    "backoff_max_s": (0.0, 300.0),
+    "deadline_s": (10.0, 1800.0),
+    "repair_attempts": (0, 3),
+    "cooldown_s": (0.0, 3600.0),
+    "fail_threshold": (1, 50),
+}
+
+
+def _clamp_reliability(raw: Any) -> dict:
+    import llm
+    base = llm.default_reliability()
+    out = dict(base)
+    for key, (lo, hi) in RELIABILITY_FIELDS.items():
+        if key not in raw or raw[key] in (None, ""):
+            continue
+        try:
+            out[key] = max(lo, min(hi, float(raw[key])))
+        except (TypeError, ValueError):
+            raise HTTPException(422, f"reliability.{key} must be a number")
+    return out
+
+
+def _resolve_entry(body: dict) -> tuple[dict, bool]:
+    """Build a chain entry for test/discovery; resolve stored key when masked.
+
+    Returns (entry, key_is_stored). The upstream key is resolved whenever the
+    frontend sends an empty or masked api_key together with an existing id —
+    raw keys are accepted from the request body only (never returned).
+    """
+    import config
+    e = dict(body or {})
+    e.setdefault("provider", "")
+    stored = None
+    eid = (e.get("id") or "").strip()
+    if not (e.get("api_key") or "").strip() or e.get("api_key") == MASKED_KEY:
+        if eid:
+            stored = next((c for c in config.load().get("chain") or []
+                           if str(c.get("id")) == eid and isinstance(c, dict)), None)
+    if stored:
+        e["api_key"] = e.get("api_key") if e.get("api_key") == MASKED_KEY else ""
+        if e["api_key"] in ("", MASKED_KEY):
+            e["api_key"] = stored.get("api_key") or ""
+        if not e.get("base_url"):
+            e["base_url"] = stored.get("base_url") or ""
+    return e, bool(stored)
+
+
+@router.get("/providers/catalog")
+async def get_catalog():
+    import llm
+    import providers as prov
+    return {
+        "catalog": [
+            {
+                "id": spec.id,
+                "name": spec.name,
+                "protocol": spec.protocol,
+                "base_url": spec.base_url,
+                "requires_key": spec.requires_key,
+                "requires_base_url": spec.id == "custom",
+                "docs": spec.docs,
+                "key_url": spec.key_url,
+            }
+            for spec in prov.PROVIDERS.values()
+        ],
+        "subscription_note": llm.SUBSCRIPTION_NOTE,
+    }
+
+
+@router.post("/providers/models")
+async def discover_models(body: dict):
+    import llm
+    import providers
+    entry, _ = _resolve_entry(body)
+    if entry.get("provider") not in providers.PROVIDERS:
+        raise HTTPException(422, "unknown provider")
+    models, err = await llm.fetch_models(entry)
+    out = {"models": models, "count": len(models), "fetched_at": _utcnow()}
+    if err:
+        out["error"] = err
+    return out
+
+
+@router.post("/providers/test")
+async def test_provider(body: dict):
+    import llm
+    entry, _ = _resolve_entry(body)
+    result = await llm.test_entry(entry)
+    ok = result == "ok"
+    return {"ok": ok, "message": "connected successfully" if ok else result,
+            "provider": entry.get("provider") or "", "model": entry.get("model") or ""}
+
+
+@router.get("/reliability")
+async def get_reliability():
+    import llm
+    stored = config.load().get("reliability") or {}
+    return {"reliability": {**llm.default_reliability(), **stored},
+            "descriptions": RELIABILITY_DESCRIPTIONS}
+
+
+@router.put("/reliability")
+async def set_reliability(body: dict):
+    rel = _clamp_reliability(body)
+    cfg = config.load()
+    cfg["reliability"] = rel
+    config.save(cfg)
+    return {"ok": True, "reliability": rel}
+
+
+def _utcnow() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+RELIABILITY_DESCRIPTIONS = {
+    "timeout_s": "Seconds before a single provider request times out.",
+    "attempts": "Try-again rounds per provider entry before falling over.",
+    "backoff_initial_s": "Wait before the first retry (doubled per attempt).",
+    "backoff_max_s": "Cap on a single retry wait.",
+    "deadline_s": "Total seconds an extraction may spend across the chain.",
+    "repair_attempts": "Rounds asking a provider to fix malformed JSON.",
+    "cooldown_s": "How long a failing entry is paused after repeated errors.",
+    "fail_threshold": "Consecutive transient failures before an entry is paused.",}
+
+
+# ── Editable extraction prompt store (Part 4) ────────────────────────────────
+
+@router.get("/prompts")
+async def list_prompts():
+    import services.prompts.store as store
+    out = {}
+    for kind in store.KINDS:
+        version, custom, updated = store.load(kind)
+        out[kind] = {
+            "title": store.TITLES[kind],
+            "purpose": store.PURPOSES[kind],
+            "default_version": version,
+            "customised": custom is not None,
+            "updated_at": updated,
+            "chart": None,  # reserved; never used (no-charts rule)
+        }
+    return out
+
+
+@router.get("/prompts/{kind}")
+async def get_prompt(kind: str):
+    import services.prompts.store as store
+    if kind not in store.KINDS:
+        raise HTTPException(404, f"unknown prompt kind: {kind}")
+    version, custom, updated = store.load(kind)
+    return {
+        "kind": kind,
+        "title": store.TITLES[kind],
+        "purpose": store.PURPOSES[kind],
+        "default_version": version,
+        "text": store.text(kind),
+        "customised": custom is not None,
+        "updated_at": updated,
+        "chars": len(store.text(kind)),
+    }
+
+
+@router.put("/prompts/{kind}")
+async def save_prompt(kind: str, body: dict):
+    import services.prompts.store as store
+    if kind not in store.KINDS:
+        raise HTTPException(404, f"unknown prompt kind: {kind}")
+    text_in = body.get("text")
+    ok, err = store.save(kind, text_in)
+    if not ok:
+        raise HTTPException(422, err)
+    version, custom, updated = store.load(kind)
+    return {"ok": True, "kind": kind, "updated_at": updated,
+            "default_version": version, "chars": len(custom or "")}
+
+
+@router.post("/prompts/{kind}/reset")
+async def reset_prompt(kind: str):
+    import services.prompts.store as store
+    if kind not in store.KINDS:
+        raise HTTPException(404, f"unknown prompt kind: {kind}")
+    store.reset(kind)
+    return {"ok": True, "kind": kind, "customised": False,
+            "default_version": store.DEFAULT_VERSION}

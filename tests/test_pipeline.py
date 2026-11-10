@@ -84,7 +84,7 @@ def test_llm_fields_do_not_override_local(data_dir, tmp_path, monkeypatch):
     _, eml_dir = _setup(tmp_path, monkeypatch)
     (eml_dir / "a.eml").write_text(SAMPLE_EML, "utf-8")
 
-    async def fake_extract(chain, prompt):
+    async def fake_extract(chain, prompt, **kwargs):
         return {"name": "Vikram S Shah", "city": "Pune"}, "fake/model"
 
     monkeypatch.setattr(pipeline.llm, "extract", fake_extract)

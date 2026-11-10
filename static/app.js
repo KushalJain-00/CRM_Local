@@ -1716,13 +1716,34 @@ function sortHistory(field) {
 
 // ── Settings ────────────────────────────────────────────────────────────────
 
+let PROVIDER_CATALOG = [];
+const MODEL_LISTS = {};  // per-row discovered model ids (session cache)
+const promptsWorking = {};
+const RELIABILITY_HINTS = {
+    timeout_s: 'Seconds before a single provider request times out.',
+    attempts: 'Retry rounds per provider entry before falling over.',
+    backoff_initial_s: 'Wait before the first retry; doubles each round.',
+    backoff_max_s: 'Cap on a single retry wait.',
+    deadline_s: 'Total seconds an extraction may spend across all providers.',
+    repair_attempts: 'Rounds asking a provider to fix malformed JSON.',
+    cooldown_s: 'How long a failing entry is paused after repeated errors.',
+    fail_threshold: 'Failures before an entry is paused automatically.',
+};
+
 async function loadSettings() {
     hideBanner('settingsBanner');
     try {
-        const settings = await api('/api/settings');
+        const [settings, catalog, rel] = await Promise.all([
+            api('/api/settings'),
+            api('/api/providers/catalog').catch(() => ({ catalog: [] })),
+            api('/api/reliability').catch(() => ({ reliability: null })),
+        ]);
         window.CRM_SETTINGS = settings;
+        PROVIDER_CATALOG = (catalog && catalog.catalog) || [];
         settingsWorking = (settings.chain || []).map(x => Object.assign({}, x));
         renderSettings({ chain: settingsWorking });
+        renderReliability((rel && rel.reliability) || null);
+        try { await loadPrompts(); } catch (e) { /* prompts are optional */ }
         // populate optional fields only when the API provides them
         if (settings.crm_dir !== undefined) document.getElementById('crmDir').value = settings.crm_dir || '';
         if (settings.eml_dir !== undefined) document.getElementById('emlDir').value = settings.eml_dir || '';
@@ -1735,6 +1756,13 @@ async function loadSettings() {
     }
 }
 
+function providerOptions(selected) {
+    const opts = PROVIDER_CATALOG.map(p =>
+        `<option value="${esc(p.id)}" ${p.id === selected ? 'selected' : ''}>${esc(p.name)}</option>`);
+    opts.push(`<option value="custom" ${selected === 'custom' ? 'selected' : ''}>Custom OpenAI-compatible</option>`);
+    return opts.join('');
+}
+
 function renderSettings(settings) {
     const providerChain = document.getElementById('providerChain');
     if (!providerChain) return;
@@ -1742,18 +1770,33 @@ function renderSettings(settings) {
 
     providerChain.innerHTML = chain.map((entry, i) => {
         const enabled = entry.enabled !== false;
+        const provider = entry.provider || '';
+        const spec = PROVIDER_CATALOG.find(p => p.id === provider);
+        const showBase = provider === 'custom' || provider === 'ollama';
+        const keyHint = (spec && spec.key_url) ? ` <a class="link" href="${esc(spec.key_url)}" target="_blank" rel="noopener">get a key</a>` : '';
         return `<li class="provider-row">
             <span class="provider-order" aria-label="Priority ${i + 1}">${i + 1}</span>
             <div class="provider-fields">
-                <input type="text" value="${esc(entry.provider || '')}" placeholder="Provider (e.g. openai)"
-                       aria-label="Provider ${i + 1} name"
-                       onchange="updateProviderSetting(${i}, 'provider', this.value)">
-                <input type="text" value="${esc(entry.model || '')}" placeholder="Model"
-                       aria-label="Provider ${i + 1} model"
-                       onchange="updateProviderSetting(${i}, 'model', this.value)">
-                <input type="password" value="${entry.api_key_set ? '********' : esc(entry.api_key || '')}" placeholder="API key"
-                       aria-label="Provider ${i + 1} API key" autocomplete="off"
-                       onchange="updateProviderSetting(${i}, 'api_key', this.value)">
+                <select aria-label="Provider ${i + 1} type"
+                        onchange="providerChanged(${i}, this.value)">${providerOptions(provider)}</select>
+                <span class="model-row">
+                    <input type="text" value="${esc(entry.model || '')}" placeholder="Model id (e.g. llama3)" list="models-${i}"
+                           aria-label="Provider ${i + 1} model (type or pick — manual entry allowed)"
+                           onchange="updateProviderSetting(${i}, 'model', this.value)">
+                    <button type="button" class="icon-btn-sm" title="Refresh model list" aria-label="Refresh model list ${i + 1}"
+                            onclick="refreshModels(${i})"><svg class="icon"><use href="#i-refresh"/></svg></button>
+                    <datalist id="models-${i}">${(MODEL_LISTS[i] || []).map(m => `<option value="${esc(m)}">`).join('')}</datalist>
+                </span>
+                ${showBase ? `<input type="text" class="mono" value="${esc(entry.base_url || '')}"
+                        placeholder="${provider === 'ollama' ? 'http://localhost:11434' : 'Required: http://localhost:1234/v1'}"
+                        aria-label="Provider ${i + 1} base URL"
+                        onchange="updateProviderSetting(${i}, 'base_url', this.value)">` : ''}
+                <span class="key-row">
+                    <input type="password" value="${entry.api_key_set ? '********' : esc(entry.api_key || '')}" placeholder="${spec && !spec.requires_key ? 'No API key needed' : 'API key'}"
+                           aria-label="Provider ${i + 1} API key" autocomplete="off"
+                           onchange="updateProviderSetting(${i}, 'api_key', this.value)">
+                    ${keyHint}
+                </span>
             </div>
             <span class="dot ${enabled ? 'is-on' : 'is-off'}" title="${enabled ? 'Enabled' : 'Disabled'}" aria-hidden="true"></span>
             <label class="switch" data-tipdir="right" data-tip="${enabled ? 'Enabled' : 'Disabled'}">
@@ -1762,12 +1805,183 @@ function renderSettings(settings) {
                 <span class="switch-track" aria-hidden="true"></span>
             </label>
             <span class="provider-tools">
+                <button type="button" class="icon-btn-sm" title="Test connection" aria-label="Test connection ${i + 1}"
+                        onclick="testProvider(${i})"><svg class="icon"><use href="#i-check"/></svg></button>
                 <button type="button" class="icon-btn-sm" title="Move up" aria-label="Move provider ${i + 1} up" ${i === 0 ? 'disabled' : ''} onclick="moveProvider(${i}, -1)"><svg class="icon" aria-hidden="true"><use href="#i-chevron-up"/></svg></button>
                 <button type="button" class="icon-btn-sm" title="Move down" aria-label="Move provider ${i + 1} down" ${i === chain.length - 1 ? 'disabled' : ''} onclick="moveProvider(${i}, 1)"><svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
                 <button type="button" class="icon-btn-sm" title="Remove" aria-label="Remove provider ${i + 1}" onclick="removeProviderSetting(${i})"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg></button>
             </span>
+            <span class="provider-test" id="testResult-${i}" role="status" aria-live="polite"></span>
         </li>`;
     }).join('');
+}
+
+async function refreshModels(i) {
+    const entry = (settingsWorking || [])[i];
+    if (!entry) return;
+    if (!entry.provider) { toast('Pick a provider first.', { type: 'info' }); return; }
+    const out = document.getElementById(`testResult-${i}`);
+    if (out) out.textContent = 'Loading models…';
+    try {
+        // key payloads must NOT be esc()'d (JSON body, not HTML) — extract
+        // the variable so render code stays visibly separate from key material.
+        const apiKey = entry.api_key_set ? '' : (entry['api_key'] || '');
+        const res = await api('/api/providers/models', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id: entry.id, provider: entry.provider,
+                base_url: entry.base_url || '', api_key: apiKey,
+            }),
+        });
+        MODEL_LISTS[i] = res.models || [];
+        if (MODEL_LISTS[i].length) {
+            renderSettings({ chain: settingsWorking });
+            if (out) out.textContent = `${MODEL_LISTS[i].length} models found (pick or type your own id).`;
+        } else if (res.error) {
+            if (out) out.textContent = res.error + ' — type the model id manually.';
+        } else {
+            if (out) out.textContent = 'Model list unavailable — type the model id manually.';
+        }
+    } catch (e) {
+        if (out) out.textContent = e.message + ' — type the model id manually.';
+    }
+}
+
+async function testProvider(i) {
+    const entry = (settingsWorking || [])[i];
+    if (!entry) return;
+    const row = {
+        id: entry.id, provider: entry.provider || '', model: entry.model || '',
+        base_url: entry.base_url || '',
+        api_key: entry.api_key_set ? '' : (entry['api_key'] || ''),
+    };
+    const out = document.getElementById(`testResult-${i}`);
+    if (out) out.textContent = 'Testing…';
+    try {
+        const res = await api('/api/providers/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(row),
+        });
+        if (out) out.textContent = res.message || (res.ok ? 'OK' : 'failed');
+    } catch (e) {
+        if (out) out.textContent = e.message;
+    }
+}
+
+function providerChanged(i, value) {
+    updateProviderSetting(i, 'provider', value);
+    // base URL visibility depends on provider; re-render keeps rows honest
+    if (value === 'custom' || value === 'ollama') {
+        settingsWorking[i].base_url = settingsWorking[i].base_url || '';
+    }
+    renderSettings({ chain: settingsWorking });
+}
+
+function renderReliability(rel) {
+    const host = document.getElementById('reliabilityFields');
+    if (!host) return;
+    reliabilityWorking = rel || {
+        timeout_s: 120, attempts: 3, backoff_initial_s: 1, backoff_max_s: 16,
+        deadline_s: 300, repair_attempts: 1, cooldown_s: 120, fail_threshold: 4,
+    };
+    host.innerHTML = Object.entries(reliabilityWorking).map(([key, value]) => `
+        <div class="field">
+            <label for="rel-${key}">${esc(key.replace(/_/g, ' '))}</label>
+            <input type="number" id="rel-${key}" class="num" step="any" min="0" value="${esc(value)}"
+                   aria-label="${esc(key.replace(/_/g, ' '))}"
+                   onchange="updateSettingReliability('${key}', this.value)">
+            <p class="field-help">${esc(RELIABILITY_HINTS[key] || '')}</p>
+        </div>`).join('');
+}
+
+function updateSettingReliability(key, value) {
+    reliabilityWorking = reliabilityWorking || {};
+    reliabilityWorking[key] = Number(value);
+    markSettingsDirty(true);
+}
+
+function renderPrompts() {
+    const host = document.getElementById('promptEditors');
+    if (!host) return;
+    host.innerHTML = ['contact', 'eml'].map(kind => {
+        const p = promptsWorking[kind] || {};
+        const meta = p.customised
+            ? `Customised${p.updated_at ? ' · saved ' + esc(p.updated_at) : ''}`
+            : `Default (v${esc(p.default_version || '1.0.0')})`;
+        const chars = (p.text || '').length;
+        return `<div class="prompt-editor" data-kind="${kind}">
+            <div class="prompt-head">
+                <h4>${esc(p.title || kind)}</h4>
+                <span class="prompt-meta">${meta} · ${chars} chars</span>
+            </div>
+            <p class="field-help">${esc(p.purpose || '')}</p>
+            <textarea id="promptText-${kind}" class="mono prompt-text" rows="12"
+                      aria-label="${esc(p.title || kind)} prompt"
+                      oninput="markPromptDirty('${kind}')">${esc(p.text || '')}</textarea>
+            <span class="prompt-status" id="promptStatus-${kind}" role="status" aria-live="polite"></span>
+            <div class="prompt-actions">
+                <button type="button" class="btn btn-sm btn-primary" onclick="savePrompt('${kind}')">Save prompt</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="resetPrompt('${kind}')">Reset to default</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function loadPrompts() {
+    const list = await api('/api/prompts');
+    for (const kind of ['contact', 'eml']) {
+        const detail = await api(`/api/prompts/${kind}`);
+        promptsWorking[kind] = detail;
+    }
+    void list;
+    renderPrompts();
+}
+
+function markPromptDirty(kind) {
+    const detail = promptsWorking[kind];
+    const el = document.getElementById(`promptText-${kind}`);
+    if (!detail || !el) return;
+    const dirty = el.value !== detail.text;
+    const status = document.getElementById(`promptStatus-${kind}`);
+    if (status) status.textContent = dirty ? 'Unsaved changes' : '';
+}
+
+async function savePrompt(kind) {
+    const el = document.getElementById(`promptText-${kind}`);
+    if (!el) return;
+    try {
+        const res = await api(`/api/prompts/${kind}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: el.value }),
+        });
+        const detail = await api(`/api/prompts/${kind}`);
+        promptsWorking[kind] = detail;
+        renderPrompts();
+        toast(`${detail.title} saved (${res.chars} chars).`, { type: 'success' });
+    } catch (e) {
+        showBanner('settingsBanner', 'error', `${kind} prompt was not saved`, e.message);
+    }
+}
+
+async function resetPrompt(kind) {
+    const yes = await confirmDialog({
+        title: 'Reset prompt to default?',
+        message: 'Your custom edits to this prompt are removed. The other prompt is untouched.',
+        confirmLabel: 'Reset',
+    });
+    if (!yes) return;
+    try {
+        await api(`/api/prompts/${kind}/reset`, { method: 'POST' });
+        const detail = await api(`/api/prompts/${kind}`);
+        promptsWorking[kind] = detail;
+        renderPrompts();
+        toast('Prompt reset to default.', { type: 'success' });
+    } catch (e) {
+        showBanner('settingsBanner', 'error', 'Could not reset prompt', e.message);
+    }
 }
 
 function addProvider() {
@@ -1833,6 +2047,7 @@ async function saveSettings() {
         eml_dir: (document.getElementById('emlDir') || {}).value || '',
         watch_interval: Number((document.getElementById('watchInterval') || {}).value) || 30,
         watch_enabled: !!(document.getElementById('watchEnabled') || {}).checked,
+        reliability: reliabilityWorking || {},
     };
     // Client preferences are safe to persist locally regardless of backend support.
     try { localStorage.setItem('crm-settings-local', JSON.stringify(payload)); } catch (e) { /* ignore */ }

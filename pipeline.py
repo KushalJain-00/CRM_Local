@@ -135,7 +135,10 @@ def pending_counts() -> dict:
     }
 
 
-async def _process_eml(path: str, con, index: db.DedupIndex, chain: list) -> None:
+async def _process_eml(path: str, con, index: db.DedupIndex, chain: list,
+                       cfg: dict | None = None) -> None:
+    cfg = cfg or config.load()
+    from services.prompts.store import text as prompt_text
     name = os.path.basename(path)
     with open(path, "rb") as fh:
         raw = fh.read()
@@ -144,7 +147,9 @@ async def _process_eml(path: str, con, index: db.DedupIndex, chain: list) -> Non
 
     ai = None
     if chain:
-        ai, label = await llm.extract(chain, build_llm_prompt(parsed))
+        ai, label = await llm.extract(chain, build_llm_prompt(parsed),
+                                      system=prompt_text("eml"),
+                                      reliability=cfg.get("reliability"))
         if ai:
             STATE.say("info", f"{name}: LLM fields via {label}")
         else:
@@ -193,7 +198,8 @@ async def _process_eml(path: str, con, index: db.DedupIndex, chain: list) -> Non
         STATE.say("warn", f"{name}: CRM push failed: {e}")
 
 
-def _process_doc(path: str, con, index: db.DedupIndex) -> None:
+async def _process_doc(path: str, con, index: db.DedupIndex, chain: list | None = None,
+                       cfg: dict | None = None) -> None:
     name = os.path.basename(path)
     table = parse.read_table(path)
     mapping, unmatched, confidence = parse.map_headers(table["headers"])
@@ -203,6 +209,9 @@ def _process_doc(path: str, con, index: db.DedupIndex) -> None:
             f"{name}: low column confidence ({int(confidence * 100)}%) — "
             f"unmapped: {', '.join(unmatched[:4]) or 'none'}",
         )
+        if chain and await _ai_document_assist(name, table, mapping, unmatched,
+                                               confidence, con, index, chain, cfg):
+            return  # AI resolved the headers; deterministic rows would repeat.
     if not mapping:
         STATE.say("warn", f"{name}: no recognisable contact columns — skipped")
         return
@@ -227,6 +236,66 @@ def _process_doc(path: str, con, index: db.DedupIndex) -> None:
         elif action == "merged" or result == "merged":
             STATE.stats["merged"] += 1
     STATE.say("ok", f"{name}: {added} new contact(s) from {len(table['rows'])} row(s)")
+
+
+# Part 4: AI assists documents only when deterministic mapping is weak — this
+# is the contact-prompt workflow. Output is gated by services/contract
+# (crm-extraction.v1); invalid output means no AI rows, never partial writes.
+async def _ai_document_assist(name, table, mapping, unmatched, confidence,
+                             con, index, chain, cfg) -> bool:
+    from services.contract import validate_extraction_result
+    from services.prompts.build_doc_request import build_doc_request
+    from services.prompts.store import text as prompt_text
+
+    user_content = build_doc_request(
+        source_type="spreadsheet",
+        headers=table["headers"],
+        rows=table["rows"],
+        layer1={"mapped": dict(mapping), "unmatched": unmatched,
+                "confidence": round(confidence, 2)},
+    )
+    cfg_eff = cfg or config.load()
+    payload, label = await llm.extract(
+        chain, user_content, system=prompt_text("contact"),
+        reliability=cfg_eff.get("reliability"))
+    if not payload:
+        STATE.say("warn", f"{name}: AI assist unavailable ({label}) — "
+                          "keeping deterministic results")
+        return False
+    payload["source_type"] = "spreadsheet"
+    data, issues = validate_extraction_result(payload, "spreadsheet")
+    if not data:
+        STATE.say("warn", f"{name}: AI output failed contract validation "
+                          f"({len(issues)} issue(s)) — discarded")
+        return False
+    added = 0
+    for c in data.get("contacts") or []:
+        contact = {
+            "name": c.get("name"), "email_primary": c.get("email_primary"),
+            "email_secondary": c.get("email_secondary"),
+            "phone_primary": c.get("phone_primary"),
+            "phone_secondary": c.get("phone_secondary"),
+            "company": c.get("company_name"),
+            "designation": c.get("position"),
+            "address": c.get("address"), "city": c.get("city"),
+            "pincode": c.get("pincode"), "website": c.get("website"),
+        }
+        if not contact["email_primary"] and not contact["phone_primary"]:
+            continue
+        if index.duplicate_reason(
+                contact["email_primary"], contact["phone_primary"], None):
+            STATE.stats["duplicates"] += 1
+        # Part 5: contacts rows carry no evidence columns; provenance stays
+        # source_file + run log. Extra numbers survive via staging by design.
+        _, result = db.upsert_contact(con, contact, "contacts", source_file=name)
+        index.add(contact["email_primary"], contact["phone_primary"], None)
+        if result == "new":
+            STATE.stats["new"] += 1
+            added += 1
+        elif result == "merged":
+            STATE.stats["merged"] += 1
+    STATE.say("ok", f"{name}: AI assist via {label} — {added} new contact(s)")
+    return True
 
 
 async def scan(which: str = "all") -> dict:
@@ -263,9 +332,9 @@ async def scan(which: str = "all") -> dict:
                         try:
                             st = os.stat(path)
                             if silo == "eml":
-                                await _process_eml(path, con, index, cfg["chain"])
+                                await _process_eml(path, con, index, cfg["chain"], cfg)
                             else:
-                                _process_doc(path, con, index)
+                                await _process_doc(path, con, index, cfg["chain"], cfg)
                             con.commit()
                             db.mark_processed(
                                 con, path, st.st_size, st.st_mtime, "ok",

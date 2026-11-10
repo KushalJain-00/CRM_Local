@@ -15,6 +15,10 @@ DEFAULTS = {
     "watch_interval": 30,
     "autostart": False,
     "theme": "light",
+    # Reliability knobs (validated/clamped in api/settings.py; resolved with
+    # llm.default_reliability()). Prompts are edited only via /api/prompts.
+    "reliability": {},
+    "prompts": {},
 }
 
 

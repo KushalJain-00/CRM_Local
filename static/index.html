@@ -653,7 +653,9 @@
           <div class="banner" id="settingsBanner" hidden></div>
           <div class="settings-layout">
             <nav class="settings-nav" aria-label="Settings sections">
-              <a href="#set-providers" class="settings-link">AI providers</a>
+              <a href="#set-providers" class="settings-link">Providers &amp; models</a>
+              <a href="#set-reliability" class="settings-link">Reliability &amp; retry</a>
+              <a href="#set-prompts" class="settings-link">Extraction prompts</a>
               <a href="#set-folders" class="settings-link">Folders</a>
               <a href="#set-appearance" class="settings-link">Appearance</a>
               <a href="#set-processing" class="settings-link">Processing</a>
@@ -661,12 +663,24 @@
             <div class="settings-sections">
               <section class="card" id="set-providers" aria-labelledby="h-providers">
                 <div class="card-head">
-                  <div><h3 id="h-providers">AI providers</h3><span class="card-sub">Tried in order, top to bottom, until one succeeds.</span></div>
+                  <div><h3 id="h-providers">Providers &amp; models</h3><span class="card-sub">Tried in order, top to bottom, until one succeeds. Cloud providers need an API key — app subscriptions alone don't include API access.</span></div>
                 </div>
                 <ol id="providerChain" class="provider-chain"></ol>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="addProvider()">
                   <svg class="icon"><use href="#i-plus"/></svg>Add provider
                 </button>
+              </section>
+              <section class="card" id="set-reliability" aria-labelledby="h-reliability">
+                <div class="card-head">
+                  <div><h3 id="h-reliability">Reliability &amp; retry</h3><span class="card-sub">How AI extraction retries, waits and recovers. Saved with “Save settings”.</span></div>
+                </div>
+                <div id="reliabilityFields" class="fields-grid"></div>
+              </section>
+              <section class="card" id="set-prompts" aria-labelledby="h-prompts">
+                <div class="card-head">
+                  <div><h3 id="h-prompts">Extraction prompts</h3><span class="card-sub">System instructions sent to your AI providers. Document and email prompts are edited separately.</span></div>
+                </div>
+                <div id="promptEditors"></div>
               </section>
               <section class="card" id="set-folders" aria-labelledby="h-folders">
                 <div class="card-head">
