@@ -259,7 +259,7 @@ async def set_autostart(body: dict):
     return {"ok": True, "enabled": enabled}
 
 
-# @app.mount("/static", StaticFiles(directory=STATIC), name="static")
+# ── static assets (see mount at end of module) ────────────────
 
 
 @app.post("/api/pick-folder")
@@ -311,3 +311,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
