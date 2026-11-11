@@ -169,33 +169,30 @@ async def _process_eml(path: str, con, index: db.DedupIndex, chain: list,
         "pincode": fields.get("pincode"),
         "website": fields.get("website"),
     }
-    if not contact["email_primary"] and not contact["phone_primary"]:
-        STATE.say("warn", f"{name}: no email or phone found — skipped")
-        return
-
     email_id = db.insert_email(con, parsed, path)
-    reason = index.duplicate_reason(
-        contact["email_primary"], contact["phone_primary"], contact["name"]
-    )
-    if reason:
-        STATE.stats["duplicates"] += 1
-        STATE.say("skip", f"{name}: duplicate by {reason} — merged into existing")
-        contact_id, _ = db.upsert_contact(
-            con, contact, "eml_contacts", source_file=name
-        )
-    else:
-        STATE.stats["new"] += 1
-        contact_id = db.insert_eml_contact(con, email_id, contact, "new", name)
+    if not contact["email_primary"] and not contact["phone_primary"]:
+        STATE.say("warn", f"{name}: no email or phone found — email logged, contact not staged")
+        return
+    from services import staging
+    contact["source_file"] = name
+    _ai_of = {"email_primary": "email"}  # merge_fields maps ai.email → email_primary
+    contact["field_origin"] = {k: ("ai" if (ai and ai.get(_ai_of.get(k, k))) else "local")
+                               for k in ("name", "email_primary", "phone_primary", "company",
+                                         "designation", "address", "city", "pincode", "website")
+                               if contact.get(k)}
+    contact["to_emails"] = getattr(parsed, "to_emails", None)
+    contact["cc_emails"] = getattr(parsed, "cc_emails", None)
+    contact["bcc_emails"] = getattr(parsed, "bcc_emails", None)
+    staged = staging.stage_contacts(con, [contact], source_type="eml",
+                                    source_file=name, source_email_id=email_id)
+    new_ids = [r[0] for r in con.execute(
+        "SELECT id FROM staged_contacts WHERE source_email_id = ?", (email_id,)).fetchall()]
+    for sid in new_ids:
+        con.execute(
+            "INSERT OR IGNORE INTO email_staged_links (email_id, staged_contact_id, created_at)"
+            " VALUES (?, ?, ?)", (email_id, sid, db.now_iso()))
+    STATE.stats["new"] += staged["staged"]
     index.add(contact["email_primary"], contact["phone_primary"], contact["name"])
-
-    # Push into the CRM silo (same unified DB now), enriching the existing row.
-    try:
-        _, action = db.upsert_contact(con, contact, "contacts", source_file=name)
-        if action == "merged":
-            STATE.stats["merged"] += 1
-        db.mark_pushed(con, contact_id)
-    except Exception as e:
-        STATE.say("warn", f"{name}: CRM push failed: {e}")
 
 
 async def _process_doc(path: str, con, index: db.DedupIndex, chain: list | None = None,
@@ -216,26 +213,21 @@ async def _process_doc(path: str, con, index: db.DedupIndex, chain: list | None 
         STATE.say("warn", f"{name}: no recognisable contact columns — skipped")
         return
     added = 0
+    from services import staging
+    batch = []
     for row in table["rows"]:
         contact = parse.row_to_contact(row, mapping)
         if not contact:
             continue
-        reason = index.duplicate_reason(
-            contact["email_primary"], contact["phone_primary"], None
-        )
-        if reason:
-            STATE.stats["duplicates"] += 1
-            action = "merged"
-        else:
-            action = "new"
-        _, result = db.upsert_contact(con, contact, "contacts", source_file=name)
-        index.add(contact["email_primary"], contact["phone_primary"], None)
-        if result == "new":
-            STATE.stats["new"] += 1
-            added += 1
-        elif action == "merged" or result == "merged":
-            STATE.stats["merged"] += 1
-    STATE.say("ok", f"{name}: {added} new contact(s) from {len(table['rows'])} row(s)")
+        contact["source_file"] = name
+        contact["source_row"] = row.get("_row") if isinstance(row, dict) else None
+        batch.append(contact)
+    staged = staging.stage_contacts(con, batch, source_type=(
+        os.path.splitext(name)[1].lstrip(".").lower() or "csv"), source_file=name)
+    STATE.stats["new"] += staged["staged"]
+    STATE.stats["duplicates"] += staged["duplicates"]
+    added = staged["staged"]
+    STATE.say("ok", f"{name}: {added} contact(s) staged from {len(table['rows'])} row(s)")
 
 
 # Part 4: AI assists documents only when deterministic mapping is weak — this

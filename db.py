@@ -755,20 +755,31 @@ def run_migrations(con: sqlite3.Connection, target: int = CURRENT_MIGRATION_VERS
 
     D-030 gate: the canonical live DB is migrated ONLY by the explicit gated
     step — set CRM_APPLY_MIGRATIONS=1 or pass force=True. App startups, tests
-    and CI must never restructure production data by accident.
+    and CI must never restructure production data by accident. Exception: a
+    database with zero user rows (fresh install) carries no data to protect,
+    so the additive train self-provisions there; the gate applies as soon as
+    any contacts/emails/processed_files exist.
     """
     con_file = _con_db_file(con)
     if not force and os.environ.get(_MIGRATION_GATE_ENV) != "1" and con_file == _live_db_file():
         try:
-            have = {r[0] for r in con.execute("SELECT version FROM _migration_log")}
+            user_rows = con.execute(
+                "SELECT (SELECT count(*) FROM contacts) + (SELECT count(*) FROM eml_emails)"
+                " + (SELECT count(*) FROM eml_contacts) + (SELECT count(*) FROM processed_files)"
+            ).fetchone()[0]
         except sqlite3.Error:
-            have = set()
-        pend = [v for v in sorted(_MIGRATIONS) if v not in have and v <= target]
-        if pend:
-            sys.stderr.write(
-                f"[db] D-030 gate: migrations {pend} pending on live DB ({con_file}); "
-                f"apply with {_MIGRATION_GATE_ENV}=1 after the step-0 backup\n")
-        return []
+            user_rows = 0
+        if user_rows > 0:
+            try:
+                have = {r[0] for r in con.execute("SELECT version FROM _migration_log")}
+            except sqlite3.Error:
+                have = set()
+            pend = [v for v in sorted(_MIGRATIONS) if v not in have and v <= target]
+            if pend:
+                sys.stderr.write(
+                    f"[db] D-030 gate: migrations {pend} pending on live DB ({con_file}); "
+                    f"apply with {_MIGRATION_GATE_ENV}=1 after the step-0 backup\n")
+            return []
 
     con.execute(
         "CREATE TABLE IF NOT EXISTS _migration_log ("

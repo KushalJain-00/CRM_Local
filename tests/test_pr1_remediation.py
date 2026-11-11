@@ -62,15 +62,13 @@ def test_multipart_upload_processes_real_csv(data_dir):
     assert body["results"][0]["status"] == "OK", body["results"]
     assert body["results"][0]["contacts_found"] >= 2
     assert body["counts"]["new"] >= 2
-    # Phase-1 backend reality (D-030: write-path redirection ships in Phase 2
-    # with v7): intake resolves uploaded bytes into canonical `contacts`, and
-    # there is no /api/contacts list router yet. Verify at the DB surface.
+    # D-007/D-030: intake stages; canonical rows are written only at approval.
     import db
     con = db.connect("crm")
+    assert con.execute("SELECT count(*) FROM contacts").fetchone()[0] == 0
     rows = [tuple(r) for r in con.execute(
-        "SELECT name, email_primary FROM contacts").fetchall()]
+        "SELECT name, email FROM staged_contacts").fetchall()]
     assert ("Asha Rao", "asha@example.com") in rows
-    # staged review surface stays queryable (empty until Phase 2 staging)
     assert client.get("/api/staged-contacts?page=1&size=50").status_code == 200
 
 
@@ -216,6 +214,6 @@ def test_upload_and_resolve_full_workflow(data_dir):
     import db
     con = db.connect("crm")
     rows = [tuple(r) for r in con.execute(
-        "SELECT name, email_primary, company FROM contacts WHERE email_primary = ?",
+        "SELECT name, email, company FROM staged_contacts WHERE email = ?",
         ("ravi@example.com",)).fetchall()]
     assert rows == [("Ravi Kumar", "ravi@example.com", "Acme")]

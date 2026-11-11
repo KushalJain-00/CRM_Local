@@ -28,6 +28,7 @@ class NormalizedContact:
     products_misc: str | None = None
     source_file: str | None = None
     source_row: int | None = None
+    source_sheet: str | None = None
     extraction_run_id: int | None = None
     field_origin: dict | None = None
     confidence: float = 0.0

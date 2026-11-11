@@ -44,13 +44,18 @@ def test_scan_processes_eml_and_pushes_to_crm(data_dir, tmp_path, monkeypatch):
     result = asyncio.run(pipeline.scan("all"))
     assert result["ok"] is True
     counts = db.counts()
-    assert counts["eml"] == 1
-    assert counts["crm"] == 2  # one from CSV, one pushed from EML
+    # D-007: intake/scan stages; canonical contacts are written only at approval.
+    assert counts["emails"] == 1
+    assert counts["crm"] == 0
+    assert counts["staged"] == 2
 
     con = db.connect("eml")
-    row = con.execute("SELECT * FROM eml_contacts").fetchone()
+    row = con.execute(
+        "SELECT * FROM staged_contacts WHERE source_type = 'eml'").fetchone()
     assert row["email_key"] == "vikram@example.com"
-    assert row["pushed_to_crm"] == 1
+    assert row["import_status"] == "NOT_IMPORTED"
+    links = con.execute("SELECT * FROM email_staged_links").fetchall()
+    assert len(links) == 1
     con.close()
 
 
@@ -94,7 +99,8 @@ def test_llm_fields_do_not_override_local(data_dir, tmp_path, monkeypatch):
 
     asyncio.run(pipeline.scan("eml"))
     con = db.connect("eml")
-    row = con.execute("SELECT name, city FROM eml_contacts").fetchone()
+    row = con.execute(
+        "SELECT name, city FROM staged_contacts WHERE source_type = 'eml'").fetchone()
     con.close()
     assert row["name"] == "Vikram Shah"  # local wins (D-007)
     assert row["city"] == "Mumbai"  # local wins (D-007)

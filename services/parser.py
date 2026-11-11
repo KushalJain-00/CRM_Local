@@ -65,6 +65,8 @@ def parse_xls(content: bytes) -> dict:
                     
                 row[h] = val if val != "" else None
             if any(v for v in row.values() if v is not None):
+                row["_row"] = r + 1
+                row["_sheet"] = name
                 all_rows.append(row)
         sheet_names_used.append(name)
 
@@ -165,8 +167,9 @@ def _extract_contacts_from_text(text: str) -> list:
         return []
 
     # Regex patterns
-    phone_re = re.compile(r'(?:\+91[\s\-]?)?[6-9]\d{9}')
-    intl_phone_re = re.compile(r'\+\d{1,3}[\s\-]?\d{5,14}')
+    # Loose candidate; digit count (7–15) is the real validator downstream.
+    phone_re = re.compile(r'(?:\+\d{1,3}[\s\-.()/]*)?(?:\(?\d[\s\-.()/]*){7,14}\d')
+    intl_phone_re = re.compile(r'\+\d{1,3}[\s\-.()/]*\d[\d\s\-.()/]{5,13}\d')
     email_re = re.compile(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}')
     url_re = re.compile(r'(?:https?://|www\.)[^\s,;]+', re.I)
     pincode_re = re.compile(r'\b[1-9]\d{5}\b')

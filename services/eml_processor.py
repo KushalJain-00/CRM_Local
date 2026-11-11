@@ -206,7 +206,10 @@ def extract_local_fields(parsed: ParsedEml) -> dict:
                 fields["city"] = ch.group(0).title()
             break
         elif ADDRESS_LINE_RE.search(s) and not fields["address"]:
-            fields["address"] = s
+            fields["address"] = re.sub(
+                r"^(registered office|correspondence address|mailing address|"
+                r"office address|corporate office|address)\s*[:\-]?\s*",
+                "", s, flags=re.I).strip()
             ch = CITY_HINTS.search(s)
             if ch and not fields["city"]:
                 fields["city"] = ch.group(0).title()
@@ -253,7 +256,10 @@ def extract_local_fields(parsed: ParsedEml) -> dict:
                     if re.search(r"manager|director|engineer|executive|president|head|associate|founder|sales|ceo|cto|coordinator|officer|analyst|consultant|lead|supervisor|owner|proprietor", nxt, re.I):
                         fields["designation"] = nxt.split(",")[0].strip()
                         break
-    elif parsed.sender_name and not NAME_REJECT.search(parsed.sender_name):
+    # Fall back to the From-header display name: the one name the sender
+    # deliberately declared — never an invention.
+    if not fields.get("name") and parsed.sender_name \
+            and not NAME_REJECT.search(parsed.sender_name):
         fields["name"] = re.sub(r"^\*+|\*+$", "", parsed.sender_name).strip()
     if not fields["email"] and parsed.sender_email:
         fields["email"] = parsed.sender_email.split(",")[0].strip().lower()

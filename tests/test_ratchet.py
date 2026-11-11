@@ -67,9 +67,12 @@ def test_dropzone_uploads_bytes_not_bare_names():
 
 # Behavioral half of BUG-D009: the API must resolve what the dropzone sends.
 def test_api_intake_resolves_dropped_bare_filename(data_dir):
-    # Send as form data (the API contract uses Form(), not JSON)
+    # A bare filename with no bytes and no file under the data dir must produce
+    # an explicit per-file error — never a silently invented empty file.
     r = client.post("/api/intake", data={"paths": "dropped_contacts.csv"})
-    assert "file not found" not in r.text
+    body = r.json()
+    assert body["results"][0]["status"] == "ERROR"
+    assert "not found" in body["results"][0]["error"]
 
 
 # Behavioral half of BUG-SEC-05: the API must refuse paths outside allowed data dirs.

@@ -23,7 +23,7 @@ ALIASES: dict[str, list[str]] = {
                         "telephone 2", "contact 2"],
     "email_primary": ["email", "e mail", "email id", "email address", "mail id", "mail",
                       "email1", "email 1"],
-    "phone_primary": ["mobile", "phone", "phone no", "mobile no", "contact no", "contact",
+    "phone_primary": ["mobile", "phone", "phone no", "mobile no", "contact no",
                       "cell", "cellphone", "telephone", "tel", "whatsapp", "mobile number",
                       "phone number", "contact number"],
     "name": ["name", "full name", "contact name", "contact person", "person name",
@@ -100,9 +100,11 @@ def parse_xlsx(content: bytes) -> dict:
         if not first:
             continue
         sheet_headers = [f"Col_{i}" if not _cell(c) else _cell(c) for i, c in enumerate(first)]
-        for raw in data:
+        for sheet_row, raw in enumerate(data, start=2):
             row = {sheet_headers[i]: _cell(v) for i, v in enumerate(raw) if i < len(sheet_headers)}
             if any(row.values()):
+                row["_row"] = sheet_row
+                row["_sheet"] = ws.title
                 rows.append(row)
                 for h in sheet_headers:
                     if h not in headers:
@@ -131,6 +133,8 @@ def parse_csv(content: bytes) -> dict:
     for raw in reader:
         row = {headers[i]: _cell(v) for i, v in enumerate(raw) if i < len(headers)}
         if any(row.values()):
+            row["_row"] = reader.line_num
+            row["_sheet"] = "CSV"
             rows.append(row)
     if not rows:
         raise ValueError("no data rows in csv")

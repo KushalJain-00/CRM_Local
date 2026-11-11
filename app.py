@@ -51,13 +51,8 @@ _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
 # Required for TestClient and uvicorn to properly exercise the startup path.
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    # Startup: clean up any stale WAL/SHM files, then initialize database, config,
-    # and optional watch pipeline
-    _db_path = Path(config.db_path("crm"))
-    for suffix in ("-wal", "-shm"):
-        sidecar = _db_path.with_name(_db_path.name + suffix)
-        if sidecar.exists():
-            sidecar.unlink()
+    # Never delete -wal/-shm: they may hold the last committed transactions
+    # after a crash. SQLite recovers them automatically on first open.
     db.init()
     config.lock_down()
     if config.load().get("watch"):

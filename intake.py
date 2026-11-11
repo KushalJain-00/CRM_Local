@@ -1,5 +1,6 @@
 # intake.py — Universal file intake for CRM_Local
 import os
+import re
 import tempfile
 import asyncio
 import logging
@@ -36,13 +37,17 @@ async def universal_intake(files, chain=None, options=None):
     total_size = 0
 
     import db
+    from services import staging
     con = db.connect("crm")
     # Resolve data directory for bare filename resolution
     data_dir = Path(config.data_dir()).resolve()
-
+    total_contacts = 0
+    run_id = None
     try:
+        run_id = staging.open_extraction_run(con, files_processed=len(files))
         for uf_path in files:
-            name = os.path.basename(uf_path)
+            # Spool files arrive as "<pid>~<i>~<original>" — show the original.
+            name = re.sub(r"^\d+~\d+~", "", os.path.basename(uf_path))
             ext = os.path.splitext(name)[1].lower()
             try:
                 # If the path has no directory component (bare filename), treat
@@ -52,13 +57,8 @@ async def universal_intake(files, chain=None, options=None):
                 has_dir = os.path.sep in uf_path or (os.path.altsep and os.path.altsep in uf_path)
                 if not has_dir:
                     uf_path = str(data_dir / uf_path)
-                # If file does not exist (bare filename from dropzone, etc.),
-                # create an empty file so the pipeline can process it.
-                # The upload transport will provide the actual content;
-                # the API accepts the filename reference.
                 if not os.path.exists(uf_path):
-                    Path(uf_path).parent.mkdir(parents=True, exist_ok=True)
-                    Path(uf_path).touch()
+                    raise ValueError(f"file not found: {name}")
                 size = os.path.getsize(uf_path)
                 if size > MAX_FILE_SIZE:
                     raise ValueError(f"file too large (max {MAX_FILE_SIZE // (1024*1024)}MB)")
@@ -78,64 +78,82 @@ async def universal_intake(files, chain=None, options=None):
                         if not any(raw[:len(m)] == m for m in _MAGIC[magic_ext]):
                             raise ValueError(f"file content does not match {ext} format")
 
-                adapter = get_adapter if False else None
-                from services.adapters import get_adapter as _get_adapter
-                adapter = _get_adapter(uf_path)
+                adapter = get_adapter(uf_path)
                 if adapter is None:
                     raise ValueError(f"no adapter for {ext}")
 
                 result = await adapter.extract(uf_path)
 
-                # For EML files, run LLM enrichment if chain provided
-                if ext == ".eml" and chain and result.contacts:
-                    with open(uf_path, "rb") as f:
-                        raw_eml = f.read()
-                    from services.eml_processor import parse_eml_bytes, extract_local_fields, build_llm_prompt, merge_fields
-                    parsed = parse_eml_bytes(raw_eml, name)
-                    local = extract_local_fields(parsed)
-                ai = None
+                # For EML files, persist the email row and stage a linked
+                # contact (D-006/D-007: never canonical from intake).
+                source_email_id = None
+                raw_eml = raw if ext == ".eml" else None
+                if ext == ".eml":
+                    from services.eml_processor import parse_eml_bytes
+                    parsed = parse_eml_bytes(raw, name)
+                    source_email_id = db.insert_email(con, parsed, uf_path)
+
                 if chain:
                     import config as _config
                     from services.prompts import store as _prompts
+                    from services.eml_processor import build_llm_prompt, merge_fields
+                    if ext == ".eml":
+                        user_content = build_llm_prompt(parsed)
+                        system = _prompts.text("eml")
+                    else:
+                        from services.prompts.build_doc_request import build_doc_request
+                        system = _prompts.text("contact")
+                        user_content = build_doc_request(
+                            source_type=ext.lstrip("."),
+                            headers=[], rows=[vars(nc) for nc in result.contacts],
+                            layer1={"mapped": {}, "unmatched": [], "confidence": 1.0},
+                        )
                     ai, label = await llm.extract(
-                        chain, build_llm_prompt(parsed),
-                        system=_prompts.text("eml"),
+                        chain, user_content,
+                        system=system,
                         reliability=_config.load().get("reliability"))
-                    merged = merge_fields(local, ai)
-                    for nc in result.contacts:
-                        nc.name = merged.get("name") or nc.name
-                        nc.email_primary = merged.get("email") or nc.email_primary
-                        nc.phone_primary = merged.get("phone_primary") or nc.phone_primary
-                        nc.company = merged.get("company") or nc.company
-                        nc.designation = merged.get("designation") or nc.designation
-                        nc.address = merged.get("address") or nc.address
-                        nc.city = merged.get("city") or nc.city
-                        nc.pincode = merged.get("pincode") or nc.pincode
-                        nc.website = merged.get("website") or nc.website
-                        nc.field_origin = {k: ("ai" if (ai and ai.get(k)) else "local") for k in ["name", "email", "phone_primary", "company", "designation", "address", "city", "pincode", "website"] if merged.get(k)}
+                    if ext == ".eml":
+                        from services.eml_processor import extract_local_fields
+                        local = extract_local_fields(parsed)
+                        merged = merge_fields(local, ai)
+                        for nc in result.contacts:
+                            nc.name = merged.get("name") or nc.name
+                            nc.email_primary = merged.get("email") or nc.email_primary
+                            nc.phone_primary = merged.get("phone_primary") or nc.phone_primary
+                            nc.company = merged.get("company") or nc.company
+                            nc.designation = merged.get("designation") or nc.designation
+                            nc.address = merged.get("address") or nc.address
+                            nc.city = merged.get("city") or nc.city
+                            nc.pincode = merged.get("pincode") or nc.pincode
+                            nc.website = merged.get("website") or nc.website
+                            nc.field_origin = {k: ("ai" if (ai and ai.get(k)) else "local") for k in ["name", "email", "phone_primary", "company", "designation", "address", "city", "pincode", "website"] if merged.get(k)}
 
-                # Upsert contacts
-                for nc in result.contacts:
-                    contact_dict = {
-                        "name": nc.name,
-                        "email_primary": nc.email_primary,
-                        "phone_primary": nc.phone_primary,
-                        "company": nc.company,
-                        "designation": nc.designation,
-                        "address": nc.address,
-                        "city": nc.city,
-                        "pincode": nc.pincode,
-                        "website": nc.website,
-                        "source_file": nc.source_file or name,
-                    }
-                    cid, action = db.upsert_contact(con, contact_dict, "contacts", source_file=name)
-                    if action == "new":
-                        counts["new"] += 1
-                    elif action == "merged":
-                        counts["merged"] += 1
-                    elif action == "skipped":
-                        counts["skipped"] += 1
+                # Stage contacts — canonical writes happen only at approval.
+                # IMPORTANT: staged_contacts may not exist yet on an unmigrated
+                # live DB; that surfaces as an explicit error, never silent loss.
+                staged = staging.stage_contacts(
+                    con, [vars(nc) for nc in result.contacts],
+                    source_type=ext.lstrip("."),
+                    source_file=name,
+                    source_email_id=source_email_id,
+                    extraction_run_id=run_id,
+                )
+                if source_email_id is not None:
+                    # link staged rows created for this email (M:N)
+                    ids = [r[0] for r in con.execute(
+                        "SELECT id FROM staged_contacts WHERE source_email_id = ?",
+                        (source_email_id,)).fetchall()]
+                    for sid in ids:
+                        con.execute(
+                            "INSERT OR IGNORE INTO email_staged_links (email_id, staged_contact_id, created_at)"
+                            " VALUES (?, ?, ?)",
+                            (source_email_id, sid, db.now_iso()))
+                total_contacts += staged["staged"]
+                counts["new"] += staged["staged"]
+                counts["skipped"] += staged["needs_review"]
 
+                db.mark_processed(con, name, size, os.path.getmtime(uf_path), "ok",
+                                  None, contacts_found=len(result.contacts))
                 results.append({
                     "file": name,
                     "status": "OK",
@@ -146,9 +164,20 @@ async def universal_intake(files, chain=None, options=None):
             except Exception as exc:
                 counts["error"] += 1
                 results.append({"file": name, "status": "ERROR", "error": str(exc)})
+                try:
+                    db.mark_processed(con, name, os.path.getsize(uf_path) if os.path.exists(uf_path) else 0,
+                                      os.path.getmtime(uf_path) if os.path.exists(uf_path) else 0,
+                                      "error", str(exc)[:300])
+                except Exception:
+                    pass
 
+        if run_id is not None:
+            staging.close_extraction_run(con, run_id, total_contacts,
+                                         status="completed" if counts["error"] == 0 else "completed_with_errors")
         con.commit()
     finally:
         con.close()
 
+    # Top-level ok means "request handled"; per-file failures are reported in
+    # results[].status == "ERROR" (frontend contract — see tests/test_intake.py).
     return {"ok": True, "results": results, "counts": counts}
