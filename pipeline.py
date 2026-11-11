@@ -235,58 +235,23 @@ async def _process_doc(path: str, con, index: db.DedupIndex, chain: list | None 
 # (crm-extraction.v1); invalid output means no AI rows, never partial writes.
 async def _ai_document_assist(name, table, mapping, unmatched, confidence,
                              con, index, chain, cfg) -> bool:
-    from services.contract import validate_extraction_result
-    from services.prompts.build_doc_request import build_doc_request
-    from services.prompts.store import text as prompt_text
-
-    user_content = build_doc_request(
-        source_type="spreadsheet",
-        headers=table["headers"],
-        rows=table["rows"],
-        layer1={"mapped": dict(mapping), "unmatched": unmatched,
-                "confidence": round(confidence, 2)},
-    )
+    from services.ai_assist import assist_document
+    from services import staging
+    table = dict(table, mapped=dict(mapping), confidence=round(confidence, 2))
     cfg_eff = cfg or config.load()
-    payload, label = await llm.extract(
-        chain, user_content, system=prompt_text("contact"),
-        reliability=cfg_eff.get("reliability"))
-    if not payload:
-        STATE.say("warn", f"{name}: AI assist unavailable ({label}) — "
+    ai_contacts = await assist_document(
+        table, name=name, chain=chain, cfg=cfg_eff,
+        source_type="spreadsheet", say=STATE.say)
+    if not ai_contacts:
+        STATE.say("warn", f"{name}: AI assist unavailable or invalid — "
                           "keeping deterministic results")
         return False
-    payload["source_type"] = "spreadsheet"
-    data, issues = validate_extraction_result(payload, "spreadsheet")
-    if not data:
-        STATE.say("warn", f"{name}: AI output failed contract validation "
-                          f"({len(issues)} issue(s)) — discarded")
-        return False
-    added = 0
-    for c in data.get("contacts") or []:
-        contact = {
-            "name": c.get("name"), "email_primary": c.get("email_primary"),
-            "email_secondary": c.get("email_secondary"),
-            "phone_primary": c.get("phone_primary"),
-            "phone_secondary": c.get("phone_secondary"),
-            "company": c.get("company_name"),
-            "designation": c.get("position"),
-            "address": c.get("address"), "city": c.get("city"),
-            "pincode": c.get("pincode"), "website": c.get("website"),
-        }
-        if not contact["email_primary"] and not contact["phone_primary"]:
-            continue
-        if index.duplicate_reason(
-                contact["email_primary"], contact["phone_primary"], None):
-            STATE.stats["duplicates"] += 1
-        # Part 5: contacts rows carry no evidence columns; provenance stays
-        # source_file + run log. Extra numbers survive via staging by design.
-        _, result = db.upsert_contact(con, contact, "contacts", source_file=name)
-        index.add(contact["email_primary"], contact["phone_primary"], None)
-        if result == "new":
-            STATE.stats["new"] += 1
-            added += 1
-        elif result == "merged":
-            STATE.stats["merged"] += 1
-    STATE.say("ok", f"{name}: AI assist via {label} — {added} new contact(s)")
+    staged = staging.stage_contacts(
+        con, ai_contacts,
+        source_type=name.rsplit(".", 1)[-1].lower() if "." in name else "csv",
+        source_file=name)
+    STATE.say("ok", f"{name}: AI assist — {staged['staged']} contact(s) staged "
+                    f"({staged['needs_review']} need review)")
     return True
 
 

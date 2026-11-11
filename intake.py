@@ -95,38 +95,59 @@ async def universal_intake(files, chain=None, options=None):
 
                 if chain:
                     import config as _config
+                    import parse as _parse
                     from services.prompts import store as _prompts
-                    from services.eml_processor import build_llm_prompt, merge_fields
+                    from services.ai_assist import assist_document
+                    _cfg = _config.load()
                     if ext == ".eml":
-                        user_content = build_llm_prompt(parsed)
-                        system = _prompts.text("eml")
-                    else:
-                        from services.prompts.build_doc_request import build_doc_request
-                        system = _prompts.text("contact")
-                        user_content = build_doc_request(
-                            source_type=ext.lstrip("."),
-                            headers=[], rows=[vars(nc) for nc in result.contacts],
-                            layer1={"mapped": {}, "unmatched": [], "confidence": 1.0},
-                        )
-                    ai, label = await llm.extract(
-                        chain, user_content,
-                        system=system,
-                        reliability=_config.load().get("reliability"))
-                    if ext == ".eml":
-                        from services.eml_processor import extract_local_fields
-                        local = extract_local_fields(parsed)
-                        merged = merge_fields(local, ai)
-                        for nc in result.contacts:
-                            nc.name = merged.get("name") or nc.name
-                            nc.email_primary = merged.get("email") or nc.email_primary
-                            nc.phone_primary = merged.get("phone_primary") or nc.phone_primary
-                            nc.company = merged.get("company") or nc.company
-                            nc.designation = merged.get("designation") or nc.designation
-                            nc.address = merged.get("address") or nc.address
-                            nc.city = merged.get("city") or nc.city
-                            nc.pincode = merged.get("pincode") or nc.pincode
-                            nc.website = merged.get("website") or nc.website
-                            nc.field_origin = {k: ("ai" if (ai and ai.get(k)) else "local") for k in ["name", "email", "phone_primary", "company", "designation", "address", "city", "pincode", "website"] if merged.get(k)}
+                        from services.eml_processor import build_llm_prompt, merge_fields, extract_local_fields
+                        ai, label = await llm.extract(
+                            chain, build_llm_prompt(parsed),
+                            system=_prompts.text("eml"),
+                            reliability=_cfg.get("reliability"))
+                        if ai:
+                            local = extract_local_fields(parsed)
+                            merged = merge_fields(local, ai)
+                            for nc in result.contacts:
+                                nc.name = merged.get("name") or nc.name
+                                nc.email_primary = merged.get("email") or nc.email_primary
+                                nc.phone_primary = merged.get("phone_primary") or nc.phone_primary
+                                nc.company = merged.get("company") or nc.company
+                                nc.designation = merged.get("designation") or nc.designation
+                                nc.address = merged.get("address") or nc.address
+                                nc.city = merged.get("city") or nc.city
+                                nc.pincode = merged.get("pincode") or nc.pincode
+                                nc.website = merged.get("website") or nc.website
+                                nc.field_origin = {k: ("ai" if (ai and ai.get(k)) else "local") for k in ["name", "email", "phone_primary", "company", "designation", "address", "city", "pincode", "website"] if merged.get(k)}
+                    elif ext in (".csv", ".xlsx", ".xls", ".pdf"):
+                        try:
+                            table = _parse.read_table(uf_path)
+                        except Exception:
+                            table = None
+                        if table:
+                            ai_contacts = await assist_document(
+                                table, name=name, chain=chain, cfg=_cfg,
+                                source_type="spreadsheet")
+                            if ai_contacts:
+                                from services.adapters import NormalizedContact
+                                for ac in ai_contacts:
+                                    result.contacts.append(NormalizedContact(
+                                        name=ac.get("name"),
+                                        email_primary=ac.get("email_primary"),
+                                        email_secondary=ac.get("email_secondary"),
+                                        phone_primary=ac.get("phone_primary"),
+                                        phone_secondary=ac.get("phone_secondary"),
+                                        whatsapp=ac.get("whatsapp"),
+                                        company=ac.get("company"),
+                                        designation=ac.get("designation"),
+                                        address=ac.get("address"),
+                                        city=ac.get("city"),
+                                        pincode=ac.get("pincode"),
+                                        website=ac.get("website"),
+                                        source_file=name,
+                                        field_origin=ac.get("field_origin"),
+                                        confidence=ac.get("confidence") or 0.3,
+                                    ))
 
                 # Stage contacts — canonical writes happen only at approval.
                 # IMPORTANT: staged_contacts may not exist yet on an unmigrated

@@ -73,12 +73,22 @@ def stage_contacts(con, contacts: list[dict], *, source_type: str, source_file: 
     Never writes canonical tables. Missing identity (no email AND no phone)
     is staged as NEEDS_REVIEW with the MISSING warning preserved, never dropped.
     """
-    counts = {"staged": 0, "needs_review": 0, "duplicates": 0, "invalid": 0}
+    counts = {"staged": 0, "needs_review": 0, "duplicates": 0, "invalid": 0,
+              "batch_duplicates": 0}
+    seen_keys: set[tuple] = set()
     run_raw = json.dumps(raw_source_data, default=str) if raw_source_data is not None else None
     for nc in contacts:
         d = dict(nc)
         d.setdefault("email_primary", d.get("email"))
         keys = _keys(d)
+        batch_key = (("e", keys["email_key"]) if keys["email_key"]
+                     else ("p", keys["phone_key"]) if keys["phone_key"]
+                     else ("n", keys["name_key"], keys["company_key"]))
+        if batch_key != ("n", None, None):
+            if batch_key in seen_keys:
+                counts["batch_duplicates"] += 1
+                continue
+            seen_keys.add(batch_key)
         issues = validation.validate_record({
             "name": d.get("name"), "email_primary": d.get("email_primary"),
             "email_secondary": d.get("email_secondary"),
