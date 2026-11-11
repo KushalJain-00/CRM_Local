@@ -17,9 +17,16 @@ def _cfg_path(data_dir):
     return data_dir / "config.json"
 
 
-def test_default_eml_is_byte_equal_to_old_llm_prompt():
+def test_default_eml_prompt_is_self_contained_and_contract_shaped():
+    """The EML prompt must be usable standalone and keep the 10-field contract."""
     import llm
-    assert store.default_text("eml") == llm.SYSTEM_PROMPT
+    text = store.default_text("eml")
+    assert text.count('"name":null') >= 1
+    for field in ("name", "email", "phone_primary", "phone_secondary", "company",
+                  "designation", "address", "city", "pincode", "website"):
+        assert field in text
+    # llm.SYSTEM_PROMPT delegates to the store default (single source of truth)
+    assert llm._default_eml_prompt() == text
 
 
 def test_default_contact_extends_master_prompt():
@@ -35,7 +42,7 @@ def test_text_falls_back_to_default_without_edit(data_dir):
 
 def test_save_persists_only_that_kind(data_dir):
     assert store.save("eml", store.default_text("eml").replace(
-        "Rules:", "Rules (edited):"))
+        "HOW TO READ THE EMAIL", "HOW TO READ THE EMAIL (edited)"))
     prompts = _stored_prompts(_cfg_path(data_dir))
     assert set(prompts) == {"eml"}  # saving one kind never creates the other
     assert "(edited)" in prompts["eml"]["text"]
