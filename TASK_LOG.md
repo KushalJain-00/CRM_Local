@@ -94,3 +94,16 @@
 - Phase 6 (advanced UI/UX): ✅ COMPLETE (design system implemented)
 - Phase 7 (QA & security): ✅ COMPLETE
 - Phase 8 (packaging & release): ⚠️ PENDING (Linux verification, docs update)
+
+## Round 8 — release/1.0.0 (2026-11-11)
+
+- Repo: release/1.0.0, 11 commits on a425302; backup/pre-mission-2026-11-11 preserved; live DB untouched
+- D-007 write path fixed: ALL intake/pipeline extraction now stages into staged_contacts; canonical writes only at approval (replay-safe, local-wins enrich; phone-key fallback added); email↔staged links
+- Fresh installs self-provision schema v10 (D-030 gate bug); live DBs still gated — sandbox-verified
+- Extraction: per-sheet XLSX header mapping, shared table mapper (csv/xlsx/xls/pdf), PDF line/block pairing (correct email↔phone), TXT adapter rebuilt; EML From-header name wins; fresh-DB WAL delete removed at startup
+- AI: bounded document chunking (absolute row provenance), cross-chunk merge with conflict preservation, contract-validated; AI now actually runs for UI uploads (chain was never passed); degradation is honest (warnings), never fabricated
+- Packaging: frozen build fixed (inspect.getsource crash in migrations; setuptools/backports.tarfile; checksums via content hash); Linux build verified boot→import→stage; SHA256SUMS in CI; Windows build pinned 3.12 + PyInstaller 6.11.1 — needs a pushed branch to run
+- Browser E2E (chromium): 10 views clean, 0 console/network errors, approve flow works
+- Quality gates: pytest 324 passed + 1 xfail; node --check OK; provider-failure fallback verified (dead provider → local extraction + explicit warning); upload rejection paths verified (unsupported ext, wrong magic, >10MB, empty)
+- Handoff docs: README (client), USER_GUIDE, BACKUP_AND_RECOVERY, MIGRATION, PRIVACY_AND_AI, RELEASE_NOTES, THIRD_PARTY_NOTICES — flagged PyMuPDF AGPL + missing LICENSE + unsigned SmartScreen
+- Windows EXE/installer: BLOCKED (no Windows host; push not authorized)
