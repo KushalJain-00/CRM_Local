@@ -226,9 +226,21 @@ def _approve_ids(con, staged_ids: List[int]) -> dict:
             already += 1  # replay-safe: never double-commit
             continue
         email = (sc["email"] or "").strip().lower() or None
-        existing = con.execute(
-            "SELECT id FROM contacts WHERE email_primary IS NOT NULL AND lower(email_primary) = ?"
-            " ORDER BY id LIMIT 1", (email,)).fetchone() if email else None
+        phone_digits = re.sub(r"\D", "", (sc["phone_primary"] or ""))
+        if len(phone_digits) == 12 and phone_digits.startswith("91"):
+            phone_digits = phone_digits[2:]
+        elif len(phone_digits) == 11 and phone_digits.startswith("0"):
+            phone_digits = phone_digits[1:]
+        phone_digits = phone_digits if len(phone_digits) >= 7 else None
+        existing = None
+        if email:
+            existing = con.execute(
+                "SELECT id FROM contacts WHERE email_primary IS NOT NULL AND lower(email_primary) = ?"
+                " ORDER BY id LIMIT 1", (email,)).fetchone()
+        if existing is None and phone_digits:
+            existing = con.execute(
+                "SELECT id FROM contacts WHERE phone_key = ? ORDER BY id LIMIT 1",
+                (phone_digits,)).fetchone()
 
         if existing:
             _enrich_existing(con, existing["id"], sc)

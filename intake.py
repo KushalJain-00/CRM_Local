@@ -91,7 +91,7 @@ async def universal_intake(files, chain=None, options=None):
                 if ext == ".eml":
                     from services.eml_processor import parse_eml_bytes
                     parsed = parse_eml_bytes(raw, name)
-                    source_email_id = db.insert_email(con, parsed, uf_path)
+                    source_email_id = db.insert_email(con, parsed, name)
 
                 if chain:
                     import config as _config

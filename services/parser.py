@@ -174,13 +174,15 @@ def _extract_contacts_from_text(text: str) -> list:
     url_re = re.compile(r'(?:https?://|www\.)[^\s,;]+', re.I)
     pincode_re = re.compile(r'\b[1-9]\d{5}\b')
 
-    # Strategy 1: Group lines into blocks separated by blank-ish gaps or numbering
+    # Strategy 1: group lines into blocks separated by numbering or "Name:"
+    # markers; fields inside a block then describe one person.
     blocks = []
     current_block = []
     for line in lines:
-        # Detect block boundaries: numbered entries, blank lines, or lines starting with SR/No
         is_boundary = (
             re.match(r'^\d{1,4}[\.\)\s]', line) and len(current_block) > 2
+        ) or (
+            re.match(r'^\s*(?:full\s+)?name\s*[:\-]', line, re.I) and current_block
         )
         if is_boundary and current_block:
             blocks.append('\n'.join(current_block))
@@ -195,43 +197,55 @@ def _extract_contacts_from_text(text: str) -> list:
         rows = []
         for block in blocks:
             row = _extract_fields_from_block(block, phone_re, intl_phone_re, email_re, url_re, pincode_re)
-            if row and any(v for v in row.values() if v):
+            # A block without any email and any phone is not a contact record.
+            if row and (row.get('Email') or row.get('Phone')):
                 rows.append(row)
         if rows:
             return rows
 
-    # Strategy 2: Line-by-line extraction — collect all phones/emails
-    # and build records from proximity
-    all_phones = phone_re.findall(text) + intl_phone_re.findall(text)
-    all_emails = email_re.findall(text)
-
-    if all_phones or all_emails:
-        rows = []
-        # Deduplicate
-        seen_phones = set()
-        seen_emails = set()
-        for p in all_phones:
-            cleaned = re.sub(r'[\s\-]', '', p)
-            if cleaned not in seen_phones:
-                seen_phones.add(cleaned)
-        for e in all_emails:
-            if e.lower() not in seen_emails:
-                seen_emails.add(e.lower())
-
-        unique_phones = list(seen_phones)
-        unique_emails = list(seen_emails)
-
-        max_items = max(len(unique_phones), len(unique_emails), 1)
-        for j in range(max_items):
-            row = {}
-            if j < len(unique_phones):
-                row['Phone'] = unique_phones[j]
-            if j < len(unique_emails):
-                row['Email'] = unique_emails[j]
-            if any(v for v in row.values() if v):
-                rows.append(row)
-        if rows:
-            return rows
+    # Strategy 2: line-by-line pairing — each line that carries an email or a
+    # phone yields one record. Never index-pair unrelated lines: a wrong
+    # number attached to the wrong person is worse than a missing one.
+    rows = []
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        emails = email_re.findall(line)
+        phones = [p for p in phone_re.findall(line) + intl_phone_re.findall(line)
+                  if 7 <= len(re.sub(r"\D", "", p)) <= 15]
+        if not emails and not phones:
+            continue
+        row = {}
+        if phones:
+            row['Phone'] = phones[0]
+            if len(phones) > 1:
+                row['Phone 2'] = phones[1]
+        if emails:
+            row['Email'] = emails[0]
+            if len(emails) > 1:
+                row['Email 2'] = emails[1]
+        urls = url_re.findall(line)
+        if urls:
+            row['Website'] = urls[0]
+        pincodes = pincode_re.findall(line)
+        if pincodes:
+            row['Pincode'] = pincodes[0]
+        # Company-like tokens on the same line (Theta Traders, Iota Ltd…)
+        comp_m = re.search(r'(?:Company|Org(?:anization)?|Firm)\s*[:\-]?\s*([^,;|]{2,80})', line, re.I)
+        if comp_m:
+            comp = re.split(r'\s{2,}|\s+(?:City|Pincode|Zip|Phone|Email|Name|Designation|Title)\b', comp_m.group(1))[0].strip()
+            if comp:
+                row['Company'] = comp
+        name_m = re.search(r'Name\s*[:\-]?\s*([A-Za-z][A-Za-z.\'\- ]{1,60}?)(?:\s{2,}|\s+(?:Email|Phone|Company|Designation|Title|City)\b|\s*,|$)', line, re.I)
+        if name_m:
+            cand = name_m.group(1).strip()
+            if cand and not email_re.search(cand):
+                row['Name'] = cand
+        if any(v for v in row.values() if v):
+            rows.append(row)
+    if rows:
+        return rows
 
     return []
 
@@ -257,9 +271,34 @@ def _extract_fields_from_block(block: str, phone_re, intl_phone_re, email_re, ur
     if pincodes:
         row['Pincode'] = pincodes[0]
 
-    # Try to extract company/person name from first line
     lines = block.strip().split('\n')
-    if lines:
+
+    # Labeled lines win over heuristics. Split on double spaces — the common
+    # one-line-per-field layout ("Name: X  Email: y@z  Phone: 123").
+    _LABELED = {
+        "Name": "Name", "Email": "Email", "Email 2": "Email 2",
+        "Phone": "Phone", "Phone 2": "Phone 2", "Mobile": "Phone",
+        "Company": "Company", "Designation": "Designation", "Title": "Designation",
+        "Address": "Address", "City": "City", "Pincode": "Pincode", "Zip": "Pincode",
+        "Website": "Website", "Industry": "Industry", "Department": "Department",
+    }
+    for ln in lines:
+        for part in re.split(r"\s{2,}|;", ln):
+            m = re.match(r"^\s*([A-Za-z][A-Za-z0-9 ]{0,30})\s*[:\-]\s*(.+?)\s*$", part)
+            if not m:
+                continue
+            key = _LABELED.get(m.group(1).strip().title())
+            if not key:
+                continue
+            val = m.group(2).strip()
+            if key == "City":
+                val = re.sub(r"\s*\b\d{5,6}\b\s*$", "", val).strip()
+            if val and not row.get(key):
+                row[key] = val[:120]
+
+    # Try to extract company/person name from first line (only when no
+    # labeled Name bound it).
+    if lines and not row.get('Name'):
         first_line = re.sub(r'^\d{1,4}[\.\)\s]+', '', lines[0]).strip()
         # If first line doesn't look like a phone/email, treat as name
         if first_line and not phone_re.search(first_line) and not email_re.search(first_line):
