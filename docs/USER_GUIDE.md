@@ -1,85 +1,113 @@
 # CRM Local — User Guide
 
-## Getting Started
+The normal workflow, start to finish.
 
-1. Install CRM Local using the Windows installer (`CRM_Local-Setup.exe`) or run the portable executable (`CRM_Local.exe`).
-2. The application opens in your browser at `http://127.0.0.1:<port>`.
-3. On first launch, you'll see the Overview page with empty statistics.
+## 1. Install
 
-## Navigation
+Run `CRM_Local-Setup.exe`. If you downloaded the portable `CRM_Local.exe`,
+put it anywhere and double-click it. No administrator rights are required
+for the per-user install. Accept the desktop shortcut if you want one.
 
-The application has 9 views accessible from the sidebar:
+## 2. Launch
 
-1. **Overview** — Dashboard with KPIs, recent activity, and data completeness
-2. **Extract** — Universal file intake (drag & drop or browse)
-3. **Contacts** — Contact management (search, filter, sort, paginate, edit, delete)
-4. **Emails** — Email browser with search and filtering
-5. **Customer Profiles** — Company and person details with source information
-6. **Analytics** — Geographic, segmentation, reachability, completeness charts
-7. **Data Quality** — Invalid emails/phones, missing fields, duplicates
-8. **History** — Processing runs, files, successes/failures, error details
-9. **Settings** — Provider configuration, folders, theme, backup/restore
+The app starts a small local server and opens your default browser at
+`http://127.0.0.1:<port>`. Everything it does stays on this machine.
 
-## Universal Extract
+Your local database and configuration live in:
 
-1. Go to the **Extract** view
-2. Drag & drop files or click "Browse Files"
-3. Supported formats: XLSX, XLS, CSV, PDF, TXT, EML
-4. Click "Extract" to process
-5. View per-file results (contacts found, errors)
-6. Files are automatically deduplicated on rescan
+- **Windows:** `%APPDATA%\CRM_Local\`
+- **Linux/macOS:** `~/.crm_local/`
 
-## Contacts
+Files there: `crm.db` (your data), `config.json` (your settings — contains API
+keys; keep it private), `uploads/` (temporary spool, cleaned automatically).
 
-- **Search:** Type in the search box to filter by name, email, phone, or company
-- **Edit:** Click "Edit" on a contact row to modify fields
-- **Delete:** Click "Delete" to remove a contact
-- **Export:** Click "Export" to download as Excel
+## 3. Optional: configure AI providers
 
-## Settings
+Everything works without AI. Local pattern matching runs always; an AI
+provider only fills gaps.
 
-### AI Providers
-- Add providers in order of preference
-- Test each provider with the "Test" button
-- Leave empty for local-only extraction
-- Supports: OpenRouter, Groq, Gemini, OpenAI, DeepSeek, Anthropic, Ollama
+In **Settings → AI providers**:
 
-### Folders
-- CRM Directory: folder containing spreadsheet/PDF files
-- EML Directory: folder containing .eml files
-- Enable "Watch" for automatic scanning
+1. Pick a provider (OpenAI, OpenRouter, Groq, Gemini, Anthropic, DeepSeek,
+   Ollama for local models, or a custom OpenAI-compatible endpoint).
+2. Paste your API key. Keys are stored on this machine only and are masked
+   in every screen and diagnostic.
+3. Use **Test** to check it, **Discover models** to list models, or type a
+   model name manually.
+4. Reorder providers with the arrows — requests try them top to bottom.
+   Disabled providers are never called.
 
-### Appearance
-- Theme: Light or Dark
+Leave the chain empty to run fully offline with local extraction only.
 
-### Processing
-- Watch interval: minimum 10 seconds
-- Enable/disable folder watching
+Extraction prompts: **Settings → Prompts** lets you view/edit the two master
+prompts (Contact documents and Email/EML). Saving validates the required
+output contract; **Reset** restores the built-in default. Edits survive
+restarts.
 
-## Data Location
+## 4. Import documents and emails
 
-```
-%APPDATA%\CRM_Local\
-  config.json
-  crm.db (unified database)
-```
+Go to **Extract** and drop files (or use the file picker):
 
-Backup: copy the entire folder. Delete to reset.
+| Format | Notes |
+|---|---|
+| CSV | Delimiter and encoding auto-detected |
+| XLSX / XLS | All sheets, merged cells, multi-row headers |
+| PDF | Text and tables; scanned images without OCR text are not supported |
+| TXT | Structured lists and contact-shaped blocks |
+| EML | Whole email: sender, recipients, signature, body |
 
-## Troubleshooting
+Large spreadsheets are processed in bounded chunks; spreadsheet rows keep
+their `row N` provenance.
 
-- **App won't start:** Check if port 8000-8010 is available
-- **No contacts extracted:** Verify file format is supported; check file size (< 10MB)
-- **LLM not working:** Verify API key and model name; test with "Test" button
-- **Database locked:** Close other instances of the app
+Each file appears in **History** with its status and the number of contacts
+found.
 
-## Build from Source
+## 5. Review extracted contacts
 
-Requires Python 3.12+.
+Everything the extractors find lands in **Staged review** — nothing enters
+your CRM without your decision. Each row shows:
 
-```bash
-python -m venv venv
-venv/bin/pip install -r requirements-dev.txt
-venv/bin/python app.py
-venv/bin/python -m pytest -q
-```
+- **Review:** Ready, Needs review, Approved, Rejected, Dismissed
+- **Dedup:** Unique, Exact duplicate, Probable duplicate, Conflict
+- **Import:** New contact created / existing contact enriched / not imported
+
+Actions per row: open, approve, reject, dismiss. Bulk actions via checkbox +
+keyboard: `J`/`K` move, `A` approve, `R` reject, `D` dismiss, `Enter` open.
+
+**Approve a new contact** — creates the CRM record.
+**Approve a duplicate of an existing contact** — enriches the existing
+record (local values win; only empty fields are filled). Approving the same
+row twice is safe — it is never duplicated.
+
+## 6. Search and manage contacts
+
+**Contacts** lists, searches, sorts and filters your CRM. Open a contact to
+edit any field inline; soft-delete hides it (it is recoverable by restoring
+from the database backup; the app never hard-deletes). Companies are matched
+by normalized website/domain keys where possible.
+
+**Customer Profiles** shows people grouped by company.
+
+## 7. Emails, History, Data Quality, Analytics
+
+- **Emails** — every imported EML with subject, date, sender, and how many
+  contacts came from it.
+- **History** — per-file ledger: status, contacts found, when. Re-importing
+  the same file is safe; duplicates surface in review.
+- **Data Quality** — counts of invalid emails/phones, duplicates, and
+  incomplete records, plus the rule catalogue the server enforces.
+- **Analytics** — summaries and tables only (no charts, by design).
+
+## 8. Back up and restore
+
+See **docs/BACKUP_AND_RECOVERY.md**. Short version: stop the app, copy
+`%APPDATA%\CRM_Local\crm.db` somewhere safe (optionally `config.json` too),
+or use the backup instructions in that document for a live-copy backup.
+Restore by replacing the file while the app is closed, or with
+`db.restore_database(backup, dest)` in a Python session.
+
+## 9. Uninstall
+
+Windows: Settings → Apps → CRM Local → Uninstall. Your data in
+`%APPDATA%\CRM_Local\` is **not** deleted by the uninstaller — remove that
+folder manually if you want a full wipe.

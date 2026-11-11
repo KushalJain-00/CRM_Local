@@ -2,12 +2,13 @@
 
 A Windows desktop app that reads two folders on your machine, extracts business contacts, and keeps them in local databases. No accounts, no cloud database, no hosting. The only network traffic is the LLM provider you configure.
 
-![CRM Local Screenshot](static/style.css)
+
 
 ## What it does
 
-- **CRM folder** — `.xlsx`, `.xls`, `.csv`, `.pdf` files are parsed, columns are mapped to contact fields automatically, and rows land in `crm.db`.
-- **EML folder** — `.eml` files are read oldest-first by their `Date` header, contacts are extracted, stored in `eml.db`, and pushed into `crm.db`.
+- **One unified database** — `crm.db` holds everything: contacts, companies, emails, files ledger, staged review queue, extraction runs, provenance and dedup keys.
+- **Staged review** — extracted contacts never enter the CRM until you approve them; duplicates, conflicts and invalid values are flagged, not hidden.
+- **Folder scan (optional)** — `.xlsx`, `.xls`, `.csv`, `.pdf` from a CRM folder and `.eml` from an EML folder can be scanned in date order; re-scans skip unchanged files.
 - Every processed file is recorded in a ledger, so a rescan never processes the same file twice.
 - Contacts are shown as a sheet inside the app and can be downloaded as a styled Excel file at any time.
 - Staged contacts go through review/approval before entering the canonical CRM database.
@@ -17,10 +18,10 @@ A Windows desktop app that reads two folders on your machine, extracts business 
 
 1. Run `CRM_Local-Setup.exe` (or `CRM_Local.exe` for a portable copy).
 2. The app opens in your browser at `http://127.0.0.1:<port>`.
-3. On the **Run** page, choose your CRM folder and your EML folder.
-4. Press **Scan now**.
+3. On **Extract**, drop CSV/XLSX/XLS/PDF/TXT/EML files — extraction is staged for review.
+4. Open **Staged review** to approve, edit, reject or dismiss each extracted contact.
 
-Windows SmartScreen may warn about an unsigned installer. Choose **More info → Run anyway**.
+Windows SmartScreen may warn about an unsigned installer. Choose **More info → Run anyway**. Installation is per-user and needs no admin rights; uninstalling does not delete your data in `%APPDATA%\CRM_Local\`.
 
 ## Settings
 
@@ -53,9 +54,8 @@ While the app is open, it scans both folders on an interval (default 30 s). **St
 
 ```
 %APPDATA%\CRM_Local\
-  config.json
-  crm.db
-  eml.db
+  config.json   (settings + provider keys, owner-only)
+  crm.db        (your entire CRM)
 ```
 
 Back up that folder by copying it. Deleting it resets the app.
@@ -80,7 +80,7 @@ Back up that folder by copying it. Deleting it resets the app.
 │      │ (sqlite3,       │    │ (crm-extraction.v1)    │      │
 │      │ migrations)     │    └─────────────────────────┘      │
 │      └─────────────────┘                                 │
-│                Unified SQLite DB (crm.db + eml.db)       │
+│                unified SQLite DB (crm.db)       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -158,7 +158,7 @@ import_status IN ('NOT_IMPORTED','NEW_CONTACT_CREATED','EXISTING_CONTACT_ENRICHE
 
 ## Migration Train (D-030)
 
-Migrations apply in order v1→v10, gated by `CRM_APPLY_MIGRATIONS=1`. Phase 1 ships only the additive subset:
+Migrations apply in order v1→v10. Fresh installs self-provision the full schema on first launch. Databases that already contain data are gated: migrations run only with `CRM_APPLY_MIGRATIONS=1` (or an explicit support step), after a backup. Ships the additive subset:
 
 - **v5c**: Status backfills + warnings on staged_contacts
 - **v6**: `contacts` rebuild (real FKs + dedup keys, step-0 backup + count verification); `position` backfilled from `designation`
@@ -184,12 +184,12 @@ Migrations apply in order v1→v10, gated by `CRM_APPLY_MIGRATIONS=1`. Phase 1 s
 
 | Format | Adapter | Key Logic |
 |---|---|---|
-| `.xlsx` | `services/adapters/xlsx.py` | openpyxl `read_only=True`; header mapping by meaning; sheet-level merge |
-| `.xls` | `services/adapters/xls.py` (via `services/parser.py`) | xlrd; skip lookup/index sheets; date cell conversion |
-| `.csv` | `services/adapters/csv.py` | `utf-8-sig` encoding; header-by-meaning mapping |
-| `.pdf` | `services/adapters/pdf.py` (via `services/parser.py`) | PyMuPDF table extraction; fallback regex contact extraction from text |
-| `.txt` | `services/adapters/txt.py` | Regex phone extraction; contact-shaped structure only |
-| `.eml` | `services/adapters/eml.py` (via `services/eml_processor.py`) | Python `email` module MIME parsing; signature detection; local field extraction |
+| `.xlsx` | `services/adapters/xlsx.py` (via `services/adapters/_table.py` + `parse.py`) | openpyxl; per-sheet header mapping by meaning (merged cells, multi-row headers) |
+| `.xls` | `services/adapters/xls.py` (via `services/parser.py`) | xlrd; skips lookup/index sheets; date-cell conversion |
+| `.csv` | `services/adapters/csv.py` | utf-8-sig; delimiter sniffing; header-by-meaning mapping |
+| `.pdf` | `services/adapters/pdf.py` (via `services/parser.py`) | PyMuPDF table extraction; labeled-line fallback paired per record |
+| `.txt` | `services/adapters/txt.py` | Phones/emails per line; best-effort names from separators |
+| `.eml` | `services/adapters/eml.py` (via `services/eml_processor.py`) | MIME stdlib parsing; signature detection; From-header display name wins |
 
 ## Extraction Pipeline
 
@@ -215,12 +215,12 @@ Export: styled Excel download, VCF/ZIP generation
 
 ## Export
 
-- **Excel**: Styled download with all contact fields, formula-protected
-- **VCF**: Per-contact vCard files
-- **ZIP**: Bulk export with all contact records
-- **PDF**: Reports with field-level evidence
+- **CSV** — contacts and emails export client-side from the current view
+  (respecting filters/selection) with formula-injection protection.
+- **Excel (.xlsx)** — styled workbook generated server-side (`export.py`),
+  with the same formula-injection protection.
 
-Export is synchronous with a 100k-row cap for v1; promote to the job model only if a measured run exceeds ~5s.
+VCF, ZIP and PDF report exports are not in this release.
 
 ## Privacy & Data Policy
 
@@ -237,4 +237,7 @@ WCAG 2.2 Level AA required: semantic HTML, keyboard navigation, visible focus, s
 
 ## License
 
-Proprietary — internal use only. See `LICENSE` for details.
+License terms have **not** been provided with this release — do not
+redistribute publicly until the project owner adds a `LICENSE` file. See
+`THIRD_PARTY_NOTICES.md` (PyMuPDF AGPL-3.0 / Artifex commercial dual
+license) before distributing to clients.
