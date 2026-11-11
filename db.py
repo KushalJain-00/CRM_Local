@@ -1,6 +1,5 @@
 # db.py — Unified SQLite store for CRM_Local (single database, all tables).
 import hashlib
-import inspect
 import json
 import re
 import sqlite3
@@ -713,7 +712,11 @@ class _Migration:
         self.fk_off = fk_off  # runner holds PRAGMA foreign_keys=OFF around fn
 
     def checksum(self) -> str:
-        return hashlib.sha256(inspect.getsource(self.fn).encode()).hexdigest()
+        # Must work in frozen (PyInstaller PYZ) mode where inspect.getsource
+        # cannot find .py sources. Content hash of the migration's identity,
+        # stable across platforms and builds.
+        payload = f"v{self.version}:{self.name}:{self.rollback_sql or ''}".encode()
+        return hashlib.sha256(payload).hexdigest()
 
 
 _MIGRATIONS: dict[int, _Migration] = {}

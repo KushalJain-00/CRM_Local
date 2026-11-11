@@ -10,7 +10,7 @@ where py >nul 2>&1
 if %errorlevel% equ 0 (set "PY=py -3") else (set "PY=python")
 
 echo   Installing build dependencies...
-%PY% -m pip install -q pyinstaller -r requirements.txt
+%PY% -m pip install -q pyinstaller==6.11.1 setuptools backports.tarfile -r requirements.txt
 if errorlevel 1 (
     echo   Dependency install failed.
     pause

@@ -2,7 +2,7 @@ name: Windows Build
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, release/**]
   pull_request:
     branches: [main, master]
   workflow_dispatch:
@@ -26,8 +26,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
-          pip install pytest-asyncio
-          pip install pyinstaller
+          # setuptools/backports.tarfile: PyInstaller's pkg_resources hook imports
+          # jaraco.text → jaraco.context → backports on Python < 3.13 (frozen
+          # builds crash at startup without them)
+          pip install setuptools backports.tarfile
+          pip install pyinstaller==6.11.1
 
       - name: Run tests
         run: python -m pytest tests/ -q
@@ -64,3 +67,26 @@ jobs:
           name: CRM_Local-installer
           path: dist/CRM_Local-Setup.exe
         continue-on-error: true
+
+      - name: Build final checksums
+        shell: pwsh
+        run: |
+          $lines = @()
+          foreach ($f in @("dist\CRM_Local.exe", "dist\CRM_Local-Setup.exe")) {
+            if (Test-Path $f) {
+              $h = (Get-FileHash $f -Algorithm SHA256).Hash
+              $size = (Get-Item $f).Length
+              $lines += "$h  $(Split-Path $f -Leaf)  ($size bytes)"
+              Write-Host "$h  $f  ($size bytes)"
+            } else {
+              Write-Host "missing (skipped): $f"
+            }
+          }
+          $lines | Out-File -Encoding utf8 dist\SHA256SUMS.txt
+          Get-Content dist\SHA256SUMS.txt
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: CRM_Local-SHA256SUMS
+          path: dist/SHA256SUMS.txt
