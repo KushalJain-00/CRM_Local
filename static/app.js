@@ -593,7 +593,7 @@ async function renderActivity(status) {
             <span class="activity-time">${esc(run.finished_at ? relTime(run.finished_at) : '')}</span></li>`);
     }
     try {
-        const jobs = await api('/api/jobs/0');
+        const jobs = await api('/api/history');
         const results = (jobs && jobs.results) || [];
         results.slice(0, 5).forEach(r => {
             const ok = String(r.status || '').toUpperCase() === 'OK';
@@ -601,7 +601,7 @@ async function renderActivity(status) {
                 <span class="activity-text">Processed <strong title="${esc(r.file || '')}">${esc(r.file || 'unknown file')}</strong> — ${esc(r.status || 'unknown')}${r.contacts_found ? `, ${fmtInt(r.contacts_found)} contacts` : ''}</span>
                 <span class="activity-time">${esc(relTime(r.processed_at))}</span></li>`);
         });
-    } catch (e) { /* jobs endpoint optional for the timeline */ }
+    } catch (e) { /* history timeline is optional for the feed */ }
     list.innerHTML = items.length ? items.join('') :
         `<li>${emptyStateHTML({ icon: 'i-clock', title: 'No activity yet', hint: 'Extract your first file to see it here.', ctaLabel: 'Go to Extract', ctaFn: "showView('extract')" })}</li>`;
 }
@@ -850,7 +850,7 @@ async function loadContacts() {
     hideBanner('contactsBanner');
     skeletonRows('contactsBody', 6);
     try {
-        const data = await api('/api/contacts?which=crm&page=' + S.contactsPage + '&size=' + S.contactsPageSize + '&sort=' + encodeURIComponent(S.sort) + '&dir=' + S.dir);
+        const data = await api('/api/contacts?page=' + S.contactsPage + '&size=' + S.contactsPageSize + '&sort=' + encodeURIComponent(S.sort) + '&dir=' + S.dir);
         S.contacts = data.rows || [];
         S.contactsTotal = data.total != null ? Number(data.total) : S.contacts.length;
         S.page = S.contactsPage; S.pageSize = S.contactsPageSize;
@@ -920,7 +920,7 @@ async function searchContacts() {
 async function _searchContactsNow() {
     const q = ((document.getElementById('contactSearch') || {}).value || '');
     try {
-        const data = await api('/api/contacts?which=crm&q=' + encodeURIComponent(q) + '&page=1&size=' + S.contactsPageSize + '&sort=' + encodeURIComponent(S.sort) + '&dir=' + S.dir);
+        const data = await api('/api/contacts?q=' + encodeURIComponent(q) + '&page=1&size=' + S.contactsPageSize + '&sort=' + encodeURIComponent(S.sort) + '&dir=' + S.dir);
         S.contacts = data.rows || [];
         S.contactsTotal = data.total != null ? Number(data.total) : S.contacts.length;
         S.contactsPage = 1; S.page = 1;
@@ -1050,7 +1050,7 @@ async function deleteContact(id) {
     });
     if (!yes) return;
     try {
-        await api('/api/contacts/crm/' + id, { method: 'DELETE' });
+        await api('/api/contacts/' + id, { method: 'DELETE' });
         toast('Contact deleted', { type: 'success' });
         loadContacts();
         loadOverview();
@@ -1070,7 +1070,7 @@ async function deleteSelectedContacts() {
     if (!yes) return;
     let failed = 0;
     for (const id of ids) {
-        try { await api('/api/contacts/crm/' + id, { method: 'DELETE' }); }
+        try { await api('/api/contacts/' + id, { method: 'DELETE' }); }
         catch (e) { failed++; }
     }
     if (failed) toast(`${ids.length - failed} deleted, ${failed} failed`, { type: 'error' });
@@ -1202,7 +1202,7 @@ async function editContact(id) {
             company: $('#dF-company').value,
         };
         try {
-            await api('/api/contacts/crm/' + id, {
+            await api('/api/contacts/' + id, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fields: fields }),
@@ -1296,7 +1296,7 @@ async function loadCustomerProfiles() {
         <div class="card"><span class="skel" style="width:45%"></span></div>
         <div class="card"><span class="skel" style="width:38%"></span></div>`;
     try {
-        const data = await api('/api/contacts?which=crm&page=1&size=' + S.contactsPageSize);
+        const data = await api('/api/contacts?page=1&size=' + S.contactsPageSize);
         S.profileContacts = data.rows || [];
         renderCustomerProfiles();
     } catch (e) {
@@ -1655,7 +1655,7 @@ async function loadDataQuality() {
 async function loadHistory() {
     skeletonRows('historyBody', 4);
     try {
-        const runs = await api('/api/jobs/0');
+        const runs = await api('/api/history');
         S.historyRows = (runs && runs.results) || [];
         renderHistoryTable();
         const info = document.getElementById('historyInfo');
@@ -2110,15 +2110,15 @@ function setAnalyticsSub(takeawayId, text) {
 async function loadAnalytics() {
     let rows = [];
     try {
-        const d = await api('/api/contacts?which=crm&page=1&size=1000');
+        const d = await api('/api/contacts?page=1&size=1000');
         rows = d.rows || [];
     } catch (e) { rows = []; }
 
-    let jobs = [];
+    let historyRows = [];
     try {
-        const j = await api('/api/jobs/0');
-        jobs = (j && j.results) || [];
-    } catch (e) { jobs = []; }
+        const j = await api('/api/history');
+        historyRows = (j && j.results) || [];
+    } catch (e) { historyRows = []; }
 
     // Geographic distribution — from real location fields only; otherwise an
     // honest empty state (nothing fabricated).
@@ -2185,11 +2185,11 @@ async function loadAnalytics() {
     }
 
     // Extraction sources — file types processed, from real history rows.
-    if (jobs.length) {
-        const src = tallyBy(jobs.map(j => ({ ext: (String(j.file || '').match(/\.([a-z0-9]+)$/i) || [,'other'])[1].toLowerCase() })), 'ext')
+    if (historyRows.length) {
+        const src = tallyBy(historyRows.map(j => ({ ext: (String(j.file || '').match(/\.([a-z0-9]+)$/i) || [,'other'])[1].toLowerCase() })), 'ext')
             .sort((a, b) => b.value - a.value);
         setTakeaway('analytics-sources-takeaway', `${src[0].label.toUpperCase()} files dominate extractions`);
-        setAnalyticsSub('analytics-sources-takeaway', 'Extraction sources · ' + fmtInt(jobs.length) + ' files');
+        setAnalyticsSub('analytics-sources-takeaway', 'Extraction sources · ' + fmtInt(historyRows.length) + ' files');
         const total = src.reduce((a, d) => a + d.value, 0);
         renderAnalyticsTable('analytics-sources', ['File type', 'Files', 'Share'],
             src.map(d => ['.' + d.label, fmtInt(d.value), Math.round(d.value / total * 100) + '%']));
@@ -2321,7 +2321,7 @@ function paletteSearchContacts(q) {
     clearTimeout(palette.contactTimer);
     palette.contactTimer = setTimeout(async () => {
         try {
-            const data = await api('/api/contacts?which=crm&q=' + encodeURIComponent(q) + '&page=1&size=5');
+            const data = await api('/api/contacts?q=' + encodeURIComponent(q) + '&page=1&size=5');
             const rows = data.rows || [];
             palette.contactResults = rows.map(c => ({
                 group: 'Contacts', icon: 'i-users', type: 'Contact',

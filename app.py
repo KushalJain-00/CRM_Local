@@ -23,12 +23,9 @@ from pydantic import BaseModel
 
 import config
 import db
-import export
-import llm
 import pipeline
-import intake
 
-from api import system, settings, intake as api_intake, jobs, staged
+from api import system, settings, intake as api_intake, jobs, staged, contacts, emails, quality, history
 
 BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 STATIC = BASE / "static"
@@ -110,20 +107,8 @@ class ConfigIn(BaseModel):
     theme: str | None = None
 
 
-class EntryIn(BaseModel):
-    provider: str
-    model: str
-    api_key: str = ""
-    base_url: str = ""
-    enabled: bool = True
-
-
 class FolderIn(BaseModel):
     initial: str = ""
-
-
-class ContactIn(BaseModel):
-    fields: dict
 
 
 # SEC-01 / D-028a: key material never leaves the server on any config or
@@ -197,21 +182,8 @@ async def index():
     return FileResponse(STATIC / "index.html")
 
 
-@app.get("/api/status")
-async def status():
-    counts = db.counts()
-    try:
-        pending = pipeline.pending_counts()
-    except Exception:
-        pending = {"crm": 0, "eml": 0}
-    return {
-        "counts": counts,
-        "pending": pending,
-        "run": pipeline.STATE.snapshot(),
-        "providers": llm.PROVIDERS,
-        "version": "1.0.0",
-    }
-
+# /api/status is served by api/system.py (registered below) — it was duplicated
+# here and crashed on a stale llm.PROVIDERS reference (AttributeError → 500).
 
 # ── /api/config retired → hard 410 (D-011) ────────────────────────────────
 
@@ -232,34 +204,14 @@ app.include_router(staged.router, prefix="/api", tags=["staged"])
 app.include_router(settings.router, prefix="/api", tags=["settings"])
 app.include_router(api_intake.router, prefix="/api", tags=["intake"])
 app.include_router(jobs.router, prefix="/api", tags=["jobs"])
+app.include_router(contacts.router, prefix="/api", tags=["contacts"])
+app.include_router(emails.router, prefix="/api", tags=["emails"])
+app.include_router(quality.router, prefix="/api", tags=["quality"])
+app.include_router(history.router, prefix="/api", tags=["history"])
 
-# Keep autostart inline (Windows-only, stays in app.py per D-010 §2.1)
-@app.post("/api/autostart")
-async def set_autostart(body: dict):
-    enabled = bool(body.get("enabled"))
-    if os.name != "nt":
-        return {"ok": False, "error": "autostart is Windows-only"}
-    # Only a frozen exe can autostart; python.exe would launch without the script.
-    if not getattr(sys, "frozen", False):
-        return {"ok": False, "error": "autostart is available in the installed app only"}
-    import threading
-    import webbrowser
-    path = Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / "CRM_Local.cmd"
-    try:
-        if enabled:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f'@echo off\r\nstart "" "{sys.executable}"\r\n', "utf-8")
-        elif path.exists():
-            path.unlink()
-    except OSError as exc:
-        return {"ok": False, "error": str(exc)}
-    cfg = config.load()
-    cfg["autostart"] = enabled
-    config.save(cfg)
-    return {"ok": True, "enabled": enabled}
-
-
-# ── static assets (see mount at end of module) ────────────────
+# ── static assets: mounted above main() so `python app.py` (and the frozen
+#    exe, which execs this module as __main__) registers the mount before
+#    uvicorn.run() blocks. Mounting after `if __name__ == "__main__"` never ran.
 
 
 @app.post("/api/pick-folder")
@@ -282,6 +234,9 @@ async def open_folder(body: FolderIn):
     else:
         subprocess.Popen(["xdg-open", path])
     return {"ok": True}
+
+
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
 def _free_port(preferred: int = 8000, tries: int = 11) -> int:
@@ -311,5 +266,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-app.mount("/static", StaticFiles(directory=STATIC), name="static")

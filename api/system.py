@@ -8,8 +8,8 @@ from fastapi import APIRouter
 
 import config
 import db
-import llm
 import pipeline
+import providers as _providers
 
 router = APIRouter()
 
@@ -27,11 +27,13 @@ async def status():
         pending = pipeline.pending_counts()
     except Exception:
         pending = {"crm": 0, "eml": 0}
+    # Never leak key material or non-serializable specs — id/name/protocol only.
+    provider_ids = sorted(_providers.PROVIDERS)
     return {
         "counts": counts,
         "pending": pending,
         "run": pipeline.STATE.snapshot(),
-        "providers": llm.PROVIDERS,
+        "providers": provider_ids,
         "version": "1.0.0",
     }
 

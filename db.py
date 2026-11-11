@@ -7,7 +7,7 @@ import sqlite3
 import os
 import shutil
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import config
@@ -1095,13 +1095,71 @@ def delete_contact(con, table, contact_id):
     return con.total_changes > 0
 
 
+def _table_cols(con, table: str) -> set[str]:
+    try:
+        return {r[1] for r in con.execute(f"PRAGMA table_info({table})").fetchall()}
+    except sqlite3.Error:
+        return set()
+
+
 def counts():
+    """DB counters for /api/status. Additive keys; missing tables (pre-migration
+    live DB) or missing columns (deleted_at before v6) degrade to 0, never raise."""
     con = connect("crm")
-    c = con.execute("SELECT count(*) FROM contacts").fetchone()[0]
-    e = con.execute("SELECT count(*) FROM eml_contacts").fetchone()[0]
-    em = con.execute("SELECT count(*) FROM eml_emails").fetchone()[0]
-    con.close()
-    return {"crm": c, "eml": e, "eml_contacts": e, "emails": em}
+    try:
+        contact_cols = _table_cols(con, "contacts")
+        live = "deleted_at IS NULL" if "deleted_at" in contact_cols else "1=1"
+        c = con.execute(f"SELECT count(*) FROM contacts WHERE {live}").fetchone()[0]
+        e = con.execute("SELECT count(*) FROM eml_contacts").fetchone()[0]
+        em = con.execute("SELECT count(*) FROM eml_emails").fetchone()[0]
+        pf = con.execute("SELECT count(*) FROM processed_files").fetchone()[0]
+        out = {"crm": c, "eml": e, "eml_contacts": e, "emails": em,
+               "processed_files": pf}
+
+        # staged pending review (needs the v3 table; absent pre-migration)
+        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='staged_contacts'").fetchone():
+            out["staged"] = con.execute(
+                "SELECT count(*) FROM staged_contacts"
+                " WHERE review_status IN ('NEW','NEEDS_REVIEW','READY')").fetchone()[0]
+        else:
+            out["staged"] = 0
+
+        # "new" = contacts created in the last 30 days (ISO strings compare lexicographically)
+        cutoff = (datetime.now() - timedelta(days=30)).isoformat(timespec="seconds")
+        out["new"] = con.execute(
+            f"SELECT count(*) FROM contacts WHERE {live} AND created_at >= ?", (cutoff,)).fetchone()[0]
+
+        # duplicates: contacts (live) sharing a normalized email_key or phone_key
+        dup_sql = f"""SELECT count(*) FROM contacts WHERE {live} AND (
+            email_key IN (SELECT email_key FROM contacts WHERE email_key IS NOT NULL AND {live}
+                          GROUP BY email_key HAVING count(*) > 1) OR
+            phone_key IN (SELECT phone_key FROM contacts WHERE phone_key IS NOT NULL AND {live}
+                          GROUP BY phone_key HAVING count(*) > 1))"""
+        out["duplicates"] = con.execute(dup_sql).fetchone()[0]
+
+        # field-quality counters over live contacts — same rules the server enforces
+        from services import validation as _validation
+        rows = con.execute(
+            f"SELECT name, email_primary, email_secondary, phone_primary, phone_secondary,"
+            f" whatsapp, pincode, company, position, designation, address, city, website"
+            f" FROM contacts WHERE {live}").fetchall()
+        inv_emails = sum(1 for r in rows
+                         if _validation.validate_email(r["email_primary"], "email_primary")
+                         or _validation.validate_email(r["email_secondary"], "email_secondary"))
+        inv_phones = sum(1 for r in rows
+                         if _validation.validate_phone(r["phone_primary"], "phone_primary")
+                         or _validation.validate_phone(r["phone_secondary"], "phone_secondary")
+                         or _validation.validate_phone(r["whatsapp"], "whatsapp"))
+        incomplete = sum(1 for r in rows
+                         if not (r["name"] and str(r["name"]).strip())
+                         or not ((r["email_primary"] and str(r["email_primary"]).strip())
+                                 or (r["phone_primary"] and str(r["phone_primary"]).strip())))
+        out["invalid_emails"] = inv_emails
+        out["invalid_phones"] = inv_phones
+        out["incomplete_records"] = incomplete
+        return out
+    finally:
+        con.close()
 
 
 def is_processed(con, path, size, mtime):

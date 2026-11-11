@@ -40,16 +40,19 @@ def test_config_get():
 
 
 def test_contacts_list():
+    # D-032 Q2: `which` param dropped outright; route implemented in the
+    # integration-repair campaign — contract is {rows, total, page, pageSize}.
     r = client.get("/api/contacts?which=crm")
-    # D-032 Q2: `which` param dropped in Phase 3; route not yet implemented.
-    # This test reflects the new contract assumption.
-    assert r.status_code == 404
+    assert r.status_code == 200
+    body = r.json()
+    assert "rows" in body and "total" in body
 
 
 def test_contacts_invalid_which():
-    # D-032 Q2: `which` param is dropped outright, not validated.
+    # D-032 Q2: `which` param is dropped outright, not validated — unknown
+    # query params are ignored, the route still answers 200.
     r = client.get("/api/contacts?which=invalid")
-    assert r.status_code == 404
+    assert r.status_code == 200
 
 
 def test_pick_folder():
