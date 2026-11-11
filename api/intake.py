@@ -101,10 +101,11 @@ async def universal_intake(
             spool_total = sum(spool_sizes)
             if spool_total > MAX_SIZE_TOTAL_MB * 1024 * 1024:
                 raise HTTPException(413, f"Payload too large (max {MAX_SIZE_TOTAL_MB} MB)")
-            result = await _universal_intake(spooled)
+            result = await _universal_intake(spooled,
+                                             chain=config.load().get("chain", []))
         finally:
             if spooled:
                 _unspool(spooled)
         return result
-    result = await _universal_intake(paths or [])
+    result = await _universal_intake(paths or [], chain=config.load().get("chain", []))
     return result

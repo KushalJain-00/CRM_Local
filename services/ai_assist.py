@@ -31,13 +31,15 @@ def ai_contacts_to_staged(c: dict) -> dict:
 
 
 async def assist_document(table: dict, *, name: str, chain: list, cfg: dict,
-                          source_type: str = "spreadsheet", say=None) -> list[dict]:
+                          source_type: str = "spreadsheet",
+                          say=None) -> tuple[list[dict], list[str]]:
     """Run contract-validated LLM assist over a parsed table.
 
-    Returns staged-ready contact dicts (possibly empty). Every failure yields
-    [] and a warning — deterministic results are never blocked by AI.
+    Returns (staged-ready contact dicts, warnings). Every failure yields []
+    with a warning explaining why — deterministic results are never blocked.
     """
     say = say or (lambda level, msg: None)
+    notes: list[str] = []
     chunks = build_doc_chunks(table, source_type=source_type,
                               layer1={"mapped": table.get("mapped"),
                                       "confidence": table.get("confidence")})
@@ -48,18 +50,22 @@ async def assist_document(table: dict, *, name: str, chain: list, cfg: dict,
             reliability=cfg.get("reliability"))
         if payload is None:
             failed.append(f"chunk {n}: {label}")
+            notes.append(f"chunk {n}: AI unavailable ({label})")
             say("warn", f"{name}: AI chunk {n}/{len(chunks)} failed ({label})")
             continue
         data, issues = validate_extraction_result(payload, source_type)
         if data is None:
             failed.append(f"chunk {n}: contract rejected ({len(issues)} issue(s))")
+            notes.append(f"chunk {n}: AI output failed contract validation")
             say("warn", f"{name}: AI chunk {n}/{len(chunks)} failed contract validation")
             continue
         results.append(data)
     if not results:
-        return []
+        notes.append("AI enrichment produced no usable output — deterministic extraction used")
+        return [], notes
     merged = merge_extraction(results)
     for w in failed:
         merged.setdefault("warnings", []).append(
             {"field": "chunk", "message": f"{w} — deterministic values retained"})
-    return [ai_contacts_to_staged(c) for c in merged.get("contacts") or []]
+    contacts = [ai_contacts_to_staged(c) for c in merged.get("contacts") or []]
+    return contacts, notes

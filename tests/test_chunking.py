@@ -86,10 +86,11 @@ def test_ai_assist_merges_chunks_and_validates(monkeypatch):
 
     monkeypatch.setattr(ai_assist.llm, "extract", fake_extract)
     cfg = {"reliability": {}}
-    out = asyncio.run(ai_assist.assist_document(
+    out, notes = asyncio.run(ai_assist.assist_document(
         table, name="t.xlsx", chain=[{"provider": "fake"}], cfg=cfg,
         source_type="spreadsheet"))
     assert out
+    assert notes == []
     emails = {c["email_primary"] for c in out}
     assert emails == {"asha@example.com", "bob@example.com"}
 
@@ -100,7 +101,8 @@ def test_ai_assist_returns_empty_on_total_failure(monkeypatch):
 
     monkeypatch.setattr(ai_assist.llm, "extract", fake_extract)
     table = _table(1)
-    out = asyncio.run(ai_assist.assist_document(
+    out, notes = asyncio.run(ai_assist.assist_document(
         table, name="t.xlsx", chain=[{"provider": "fake"}], cfg={"reliability": {}},
         source_type="spreadsheet"))
     assert out == []
+    assert notes

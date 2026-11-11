@@ -125,9 +125,11 @@ async def universal_intake(files, chain=None, options=None):
                         except Exception:
                             table = None
                         if table:
-                            ai_contacts = await assist_document(
+                            ai_contacts, ai_notes = await assist_document(
                                 table, name=name, chain=chain, cfg=_cfg,
                                 source_type="spreadsheet")
+                            if ai_notes:
+                                result.warnings.extend(ai_notes)
                             if ai_contacts:
                                 from services.adapters import NormalizedContact
                                 for ac in ai_contacts:

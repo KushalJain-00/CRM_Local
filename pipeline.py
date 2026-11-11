@@ -239,7 +239,7 @@ async def _ai_document_assist(name, table, mapping, unmatched, confidence,
     from services import staging
     table = dict(table, mapped=dict(mapping), confidence=round(confidence, 2))
     cfg_eff = cfg or config.load()
-    ai_contacts = await assist_document(
+    ai_contacts, _ai_notes = await assist_document(
         table, name=name, chain=chain, cfg=cfg_eff,
         source_type="spreadsheet", say=STATE.say)
     if not ai_contacts:
