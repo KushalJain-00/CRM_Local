@@ -2,7 +2,6 @@ import xlrd
 import re
 import time
 import os
-import fitz  # PyMuPDF
 
 
 def parse_xls(content: bytes) -> dict:
@@ -77,65 +76,90 @@ def parse_xls(content: bytes) -> dict:
     return {"sheet": combined_name, "headers": all_headers, "rows": all_rows}
 
 
+_EMAIL_RE_SIMPLE = re.compile(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}")
+
+
+def _looks_like_header(row: list) -> bool:
+    """True when a table's first row reads like labels, not contact data."""
+    vals = [str(c or "").strip() for c in row]
+    nonempty = [v for v in vals if v]
+    if len(nonempty) < 2:
+        return False
+    joined = " ".join(nonempty)
+    if _EMAIL_RE_SIMPLE.search(joined):
+        return False
+    digits = re.sub(r"\D", "", joined)
+    if len(digits) >= 7:  # contains a phone-like number → data row
+        return False
+    return True
+
+
 def parse_pdf(content: bytes) -> dict:
     start_time = time.time()
     rows = []
     headers = None
     max_pages = int(os.getenv("PDF_MAX_PAGES", 200))
     timeout_sec = int(os.getenv("PARSER_TIMEOUT", 30))
-    all_text_pages = []  
+    all_text_pages = []
 
-    doc = fitz.open(stream=content, filetype="pdf")
-    for page_num, page in enumerate(doc):
+    # pdfplumber (MIT) — AGPL-safe PDF parsing. Text extraction via pdfminer.six;
+    # tables detected by ruling lines / cell rects.
+    import io as _io
+    import pdfplumber
+    try:
+        doc = pdfplumber.open(_io.BytesIO(content))
+    except Exception as e:
+        raise ValueError(f"could not open PDF: {e}") from e
+    for page_num, page in enumerate(doc.pages):
         if time.time() - start_time > timeout_sec:
             raise TimeoutError(f"PDF processing exceeded {timeout_sec} seconds limit")
         if page_num >= max_pages:
             break
 
-        tables = page.find_tables()
+        tables_found = page.find_tables()
         table_found = False
-        if tables and tables.tables:
-            for tab in tables.tables:
-                table = tab.extract()
-                if not table:
-                    continue
-                table = [r for r in table if r and any(c for c in r if c)]
-                if not table:
-                    continue
-                table_found = True
-                if headers is None and len(table) > 1:
-                    raw_headers = [str(c).strip() if c else f"Col_{i}" for i, c in enumerate(table[0])]
+        for tab in tables_found:
+            table = tab.extract()
+            if not table:
+                continue
+            table = [r for r in table if r and any(c for c in r if c)]
+            if not table:
+                continue
+            table_found = True
+            if headers is None and len(table) > 1:
+                raw_headers = [str(c).strip() if c else f"Col_{i}" for i, c in enumerate(table[0])]
+                if _looks_like_header(raw_headers):
                     headers = _dedupe_headers(raw_headers)
                     data_rows = table[1:]
                 else:
-                    if headers and len(table) > 0:
-                        first_row_cleaned = [str(c).strip() if c else '' for c in table[0]]
-                        header_cleaned = [h.strip() for h in headers]
-                        if first_row_cleaned == header_cleaned:
-                            data_rows = table[1:]
-                        else:
-                            data_rows = table
-                    else:
-                        data_rows = table
-                for raw_row in data_rows:
-                    if not any(c for c in raw_row if c):
-                        continue
-                    if headers:
-                        row = {headers[i]: str(raw_row[i]).strip() if i < len(raw_row) and raw_row[i] else None
-                               for i in range(len(headers))}
-                    else:
-                        row = {f"Col_{i}": str(v).strip() if v else None for i, v in enumerate(raw_row)}
-                    if any(v for v in row.values() if v):
-                        rows.append(row)
+                    headers = [f"Col_{i}" for i in range(len(table[0]))]
+                    data_rows = table
+            else:
+                if headers:
+                    first_row_cleaned = [str(c).strip() if c else '' for c in table[0]]
+                    header_cleaned = [h.strip() for h in headers]
+                    data_rows = table[1:] if first_row_cleaned == header_cleaned else table
+                else:
+                    data_rows = table
+            for raw_row in data_rows:
+                if not any(c for c in raw_row if c):
+                    continue
+                if headers:
+                    row = {headers[i]: str(raw_row[i]).strip() if i < len(raw_row) and raw_row[i] else None
+                           for i in range(len(headers))}
+                else:
+                    row = {f"Col_{i}": str(v).strip() if v else None for i, v in enumerate(raw_row)}
+                if any(v for v in row.values() if v):
+                    rows.append(row)
 
-        text = page.get_text()
+        text = page.extract_text() or ""
         if text and not table_found:
             all_text_pages.append(text)
-            
+
     doc.close()
 
-    # If tables produced enough rows, return them
-    if rows and len(rows) >= 2:
+    # If tables produced any rows, return them
+    if rows:
         if headers is None:
             headers = list(rows[0].keys()) if rows else []
         return {"sheet": "PDF Import", "headers": headers, "rows": rows}
@@ -193,7 +217,7 @@ def _extract_contacts_from_text(text: str) -> list:
         blocks.append('\n'.join(current_block))
 
     # If we got reasonable blocks, extract from each
-    if len(blocks) >= 3:
+    if len(blocks) >= 2:
         rows = []
         for block in blocks:
             row = _extract_fields_from_block(block, phone_re, intl_phone_re, email_re, url_re, pincode_re)
@@ -283,7 +307,12 @@ def _extract_fields_from_block(block: str, phone_re, intl_phone_re, email_re, ur
         "Website": "Website", "Industry": "Industry", "Department": "Department",
     }
     for ln in lines:
-        for part in re.split(r"\s{2,}|;", ln):
+        # Field split: double spaces/semicolons, or any boundary before a
+        # known label (pdfplumber collapses double spaces to one).
+        parts = re.split(
+            r"\s{2,}|;|(?=(?:Email|Phone|Mobile|Name|Company|Designation|Title|"
+            r"Address|City|Pincode|Zip|Website|Industry|Department)\s*[:\-])", ln)
+        for part in parts:
             m = re.match(r"^\s*([A-Za-z][A-Za-z0-9 ]{0,30})\s*[:\-]\s*(.+?)\s*$", part)
             if not m:
                 continue
