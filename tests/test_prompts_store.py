@@ -48,9 +48,11 @@ def test_save_persists_only_that_kind(data_dir):
     assert "(edited)" in prompts["eml"]["text"]
     assert prompts["eml"]["default_version"] == store.DEFAULT_VERSION
     assert prompts["eml"]["updated_at"]
-    # config.json stays 0600 (SEC-09)
+    # config.json stays 0600 on POSIX (SEC-09); Windows inherits the
+    # user-profile ACL and os.chmod cannot express owner-only there.
     import os, stat
-    assert stat.S_IMODE(os.stat(_cfg_path(data_dir)).st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(os.stat(_cfg_path(data_dir)).st_mode) == 0o600
 
 
 def test_save_rejects_empty_and_unknown_kind(data_dir):
