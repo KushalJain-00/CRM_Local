@@ -36,6 +36,15 @@ First client release. Local-first CRM extraction for Windows.
 - PDF parsing uses pdfplumber (MIT) and its permissively-licensed
   dependencies (pdfminer.six, pypdfium2, Pillow) — no copyleft obligations.
 
+### Quality gates
+
+- 332 tests green on a fresh venv install (Python 3.14; CI matrix 3.11/3.12).
+- Deterministic extraction scores 17/17 contacts on a synthetic corpus with
+  zero fabricated values (tests/corpus/). Layer-1 falls back safely when AI
+  is unavailable.
+- Dependencies: all runtime libraries are MIT/BSD/Apache-class; pdfplumber
+  replaced PyMuPDF. See THIRD_PARTY_NOTICES.md.
+
 ### Known limitations
 
 - Scanned PDFs without a text layer are not OCR'd.
