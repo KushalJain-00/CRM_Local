@@ -31,6 +31,9 @@ First client release. Local-first CRM extraction for Windows.
 ### Packaging
 
 - Windows build via PyInstaller 6.11.1 on Python 3.12; Inno Setup installer.
+  Build verified: GitHub Actions run 43322333133 (main @ 7739f83) — all steps
+  green; artifacts CRM_Local.exe (47,762,343 B) and CRM_Local-Setup.exe
+  (48,880,259 B), SHA256 published in the build's SHA256SUMS.txt.
 - The frozen build self-verifies at first launch (database, schema, static
   assets, staging pipeline).
 - PDF parsing uses pdfplumber (MIT) and its permissively-licensed
