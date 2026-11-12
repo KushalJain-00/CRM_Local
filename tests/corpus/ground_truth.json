@@ -1,0 +1,132 @@
+{
+  "sample.csv": [
+    {
+      "name": "Aarav Sharma",
+      "email_primary": "aarav@kexample.com",
+      "phone_primary": "+91 98765 43210",
+      "company": "Acme Corp",
+      "city": "Mumbai",
+      "pincode": "400001"
+    },
+    {
+      "name": "Priya Nair",
+      "email_primary": "priya.nair@kexample.in",
+      "phone_primary": "09876543211",
+      "company": "Beta Industries",
+      "city": "Pune",
+      "pincode": "411045"
+    },
+    {
+      "name": "Rahul Mehta",
+      "email_primary": null,
+      "phone_primary": "+91-91234-56789",
+      "company": "Gamma Ltd",
+      "city": "Delhi",
+      "pincode": "110001"
+    }
+  ],
+  "messy.csv": [
+    {
+      "name": "Sara Kulkarni",
+      "email_primary": "sara@kexample.com",
+      "phone_primary": "9000000111",
+      "company": "Delta Systems",
+      "city": null,
+      "pincode": null
+    },
+    {
+      "name": "Arjun Mehta",
+      "email_primary": "arjun@kexample.com",
+      "phone_primary": "9000000222",
+      "company": "Eta Works",
+      "city": null,
+      "pincode": null
+    }
+  ],
+  "multi_sheet.xlsx": [
+    {
+      "name": "Sneha Iyer",
+      "email_primary": "sneha@kexample.com",
+      "phone_primary": "9876500011",
+      "company": "Zeta Traders",
+      "source_sheet": "North"
+    },
+    {
+      "name": "Meera Kapoor",
+      "email_primary": "meera@kexample.org",
+      "phone_primary": "9876500333",
+      "source_sheet": "South"
+    }
+  ],
+  "legacy.xls": [
+    {
+      "name": "Old Format Person",
+      "email_primary": "old@kexample.com",
+      "phone_primary": "9000012345"
+    }
+  ],
+  "contacts.pdf": [
+    {
+      "name": "Divya Krishnan",
+      "email_primary": "divya@kexample.com",
+      "phone_primary": "98222 33445",
+      "company": "Theta Traders"
+    },
+    {
+      "name": "Manish Verma",
+      "email_primary": "manish@kexample.net",
+      "phone_primary": "98222 55667",
+      "company": "Iota Ltd",
+      "city": "Jaipur",
+      "pincode": "302001"
+    }
+  ],
+  "table.pdf": [
+    {
+      "name": "Table Person One",
+      "email_primary": "table1@kexample.com",
+      "phone_primary": "9000007771"
+    },
+    {
+      "name": "Table Person Two",
+      "email_primary": "table2@kexample.com",
+      "phone_primary": "9000007772"
+    }
+  ],
+  "list.txt": [
+    {
+      "name": "Ananya Gupta",
+      "email_primary": "ananya@kexample.com",
+      "phone_primary": "+91 98111 22334"
+    },
+    {
+      "name": "Karthik Menon",
+      "email_primary": "karthik.menon@kexample.co",
+      "phone_primary": "98111 99887"
+    }
+  ],
+  "sig.eml": [
+    {
+      "name": "Rohit Malhotra",
+      "email_primary": "rohit@kexample.com",
+      "phone_primary": "+91 99333 22110",
+      "city": "Bengaluru",
+      "pincode": "560025"
+    }
+  ],
+  "forwarded.eml": [
+    {
+      "name": "Priya Nair",
+      "email_primary": "priya.nair@kexample.com",
+      "phone_primary": "+91 98220 11111"
+    }
+  ],
+  "role.eml": [
+    {
+      "name": "Vikram Rao",
+      "email_primary": "vikram.r@kexample.com",
+      "phone_primary": "+91 99777 66661",
+      "company": "Iota Ltd"
+    }
+  ]
+}

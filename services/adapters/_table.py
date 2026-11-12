@@ -19,8 +19,10 @@ def contacts_from_table(path: str, table: dict, adapter: str) -> ExtractionResul
     for row in table["rows"]:
         groups.setdefault(row.get("_sheet") or "", []).append(row)
     for sheet, rows in groups.items():
-        sheet_headers = [h for h in (rows[0].keys() if rows else [])
-                         if not str(h).startswith("_")]
+        # Union of keys across all rows of the sheet — fallback-built rows
+        # may carry different keys (e.g. a later row has City/Pincode).
+        sheet_headers = list(dict.fromkeys(
+            k for row in rows for k in row if not str(k).startswith("_")))
         mapping, unmatched, confidence = parse.map_headers(sheet_headers)
         tag = f"[{sheet}] " if len(groups) > 1 else ""
         if unmatched:

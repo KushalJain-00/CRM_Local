@@ -1,0 +1,106 @@
+{
+  "files": {
+    "sample.csv": {
+      "expected": 3,
+      "found": 3,
+      "matched": 3,
+      "fields": {},
+      "fabrication": []
+    },
+    "messy.csv": {
+      "expected": 2,
+      "found": 2,
+      "matched": 2,
+      "fields": {},
+      "fabrication": []
+    },
+    "multi_sheet.xlsx": {
+      "expected": 2,
+      "found": 2,
+      "matched": 2,
+      "fields": {},
+      "fabrication": []
+    },
+    "legacy.xls": {
+      "expected": 1,
+      "found": 1,
+      "matched": 1,
+      "fields": {},
+      "fabrication": []
+    },
+    "contacts.pdf": {
+      "expected": 2,
+      "found": 2,
+      "matched": 2,
+      "fields": {},
+      "fabrication": []
+    },
+    "table.pdf": {
+      "expected": 2,
+      "found": 2,
+      "matched": 2,
+      "fields": {},
+      "fabrication": []
+    },
+    "list.txt": {
+      "expected": 2,
+      "found": 2,
+      "matched": 2,
+      "fields": {},
+      "fabrication": []
+    },
+    "sig.eml": {
+      "expected": 1,
+      "found": 1,
+      "matched": 1,
+      "fields": {},
+      "fabrication": []
+    },
+    "forwarded.eml": {
+      "expected": 1,
+      "found": 1,
+      "matched": 1,
+      "fields": {},
+      "fabrication": []
+    },
+    "role.eml": {
+      "expected": 1,
+      "found": 1,
+      "matched": 1,
+      "fields": {},
+      "fabrication": []
+    }
+  },
+  "fields": {
+    "name": {
+      "tp": 17,
+      "fp": 0,
+      "fn": 0
+    },
+    "email_primary": {
+      "tp": 16,
+      "fp": 0,
+      "fn": 0
+    },
+    "phone_primary": {
+      "tp": 17,
+      "fp": 0,
+      "fn": 0
+    },
+    "company": {
+      "tp": 9,
+      "fp": 0,
+      "fn": 0
+    },
+    "city": {
+      "tp": 5,
+      "fp": 0,
+      "fn": 0
+    },
+    "pincode": {
+      "tp": 5,
+      "fp": 0,
+      "fn": 0
+    }
+  }
+}

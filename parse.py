@@ -27,7 +27,7 @@ ALIASES: dict[str, list[str]] = {
                       "cell", "cellphone", "telephone", "tel", "whatsapp", "mobile number",
                       "phone number", "contact number"],
     "name": ["name", "full name", "contact name", "contact person", "person name",
-             "customer name", "client name", "first name", "contact"],
+             "customer name", "client name", "first name", "contact", "person"],
     "company": ["company", "company name", "organization", "organisation", "firm",
                 "account", "employer", "business"],
     "designation": ["designation", "job title", "title", "role", "position", "department"],
