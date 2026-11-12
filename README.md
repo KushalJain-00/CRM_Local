@@ -187,7 +187,7 @@ Migrations apply in order v1→v10. Fresh installs self-provision the full schem
 | `.xlsx` | `services/adapters/xlsx.py` (via `services/adapters/_table.py` + `parse.py`) | openpyxl; per-sheet header mapping by meaning (merged cells, multi-row headers) |
 | `.xls` | `services/adapters/xls.py` (via `services/parser.py`) | xlrd; skips lookup/index sheets; date-cell conversion |
 | `.csv` | `services/adapters/csv.py` | utf-8-sig; delimiter sniffing; header-by-meaning mapping |
-| `.pdf` | `services/adapters/pdf.py` (via `services/parser.py`) | PyMuPDF table extraction; labeled-line fallback paired per record |
+| `.pdf` | `services/adapters/pdf.py` (via `services/parser.py`) | pdfplumber (MIT) table extraction; labeled-line fallback paired per record |
 | `.txt` | `services/adapters/txt.py` | Phones/emails per line; best-effort names from separators |
 | `.eml` | `services/adapters/eml.py` (via `services/eml_processor.py`) | MIME stdlib parsing; signature detection; From-header display name wins |
 

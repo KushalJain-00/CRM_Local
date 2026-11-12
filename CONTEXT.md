@@ -27,7 +27,7 @@ The project originated from a master brief session. Key constraints and mandates
 | Format | Extension | Adapter | Extraction Method |
 |---|---|---|---|
 | Spreadsheet | `.xlsx`, `.xls` | `services/adapters/xlsx.py`, `services/adapters/xls.py` (via `parser.py`) | Header mapping by meaning; regex for XLS; openpyxl for XLSX |
-| PDF | `.pdf` | `services/adapters/pdf.py` (via `parser.py`) | PyMuPDF table extraction; regex fallback from text |
+| PDF | `.pdf` | `services/adapters/pdf.py` (via `parser.py`) | pdfplumber (MIT) table extraction; labeled-line fallback paired per record |
 | CSV | `.csv` | `services/adapters/csv.py` | Header-by-meaning mapping; `utf-8-sig` encoding |
 | TXT | `.txt` | `services/adapters/txt.py` | Regex phone extraction; contact-shaped structures only |
 | EML | `.eml` | `services/adapters/eml.py` (via `eml_processor.py`) | Python `email` module MIME parsing; signature detection; local field extraction |
@@ -122,7 +122,7 @@ Single shared JSON contract embedded in every extraction request. Validated by `
 | **Language** | Python 3.12+ |
 | **Database** | SQLite (unified `crm.db` + `eml.db`) with WAL mode, foreign keys |
 | **Build** | PyInstaller + Inno Setup 6 (Windows .exe/.msi) |
-| **Extraction** | - openpyxl (xlsx), xlrd (xls)<br>- PyMuPDF (pdf)<br>- Python stdlib csv (csv)<br>- regex (txt, eml)<br>- Python `email` module (eml) |
+| **Extraction** | - openpyxl (xlsx), xlrd (xls)<br>- pdfplumber (pdf, MIT)<br>- Python stdlib csv (csv)<br>- regex (txt, eml)<br>- Python `email` module (eml) |
 | **LLM** | OpenRouter, Groq, Gemini, OpenAI, DeepSeek, Anthropic, Ollama (local) via provider chain |
 | **Frontend** | Vanilla JS, native ES modules; no framework; no charts; WCAG 2.2 AA |
 | **Styling** | CSS custom properties; warm neutrals `#F7F7F5`/`#1C1C1A`; accent `#2563EB`; Inter + IBM Plex Mono; 4/8px spacing; Lucide icons |

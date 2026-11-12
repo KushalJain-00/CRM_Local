@@ -33,8 +33,8 @@ First client release. Local-first CRM extraction for Windows.
 - Windows build via PyInstaller 6.11.1 on Python 3.12; Inno Setup installer.
 - The frozen build self-verifies at first launch (database, schema, static
   assets, staging pipeline).
-- Known packaging note: PyMuPDF (PDF parsing) is dual-licensed AGPL-3.0 /
-  Artifex commercial. See THIRD_PARTY_NOTICES.md before distributing.
+- PDF parsing uses pdfplumber (MIT) and its permissively-licensed
+  dependencies (pdfminer.six, pypdfium2, Pillow) — no copyleft obligations.
 
 ### Known limitations
 

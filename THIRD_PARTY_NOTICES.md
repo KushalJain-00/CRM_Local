@@ -11,30 +11,28 @@ distribution. Versions as pinned in requirements.txt at build time.
 | AnyIO | 4.16.0 | MIT |
 | Uvicorn | 0.29.0 | BSD-3-Clause |
 | httpx | 0.27.0 | BSD-3-Clause |
+| python-multipart | 0.0.33 | Apache-2.0 |
 | openpyxl | 3.1.2 | MIT |
 | xlrd | 2.0.1 | BSD |
-| PyMuPDF | 1.28.2 | Dual: GNU AGPL-3.0 or Artifex Commercial |
+| pypdfium2 | 5.15.2 | BSD-3-Clause / Apache-2.0 |
+| pdfminer.six | 20260107 | MIT |
+| pdfplumber | 0.11.10 | MIT |
+| Pillow | 13.0.0 | MIT-CMU |
+| pypdf | (transitive) | BSD |
 | pytest (dev) | 9.1.1 | MIT |
+| reportlab (dev/test-only) | 4.4.4 | BSD |
 | PyInstaller (build) | 6.11.1 | GPL-2.0 with bootloader exception |
 
-## PyMuPDF license notice (important)
+## License summary
 
-PyMuPDF is used for PDF parsing. It is offered by Artifex under the
-**GNU Affero General Public License v3.0** or under a **commercial license**
-from Artifex. Distribution of this application to clients may constitute
-distribution of a combined work. The project owner must either:
-
-1. Obtain an Artifex commercial license, or
-2. Open-source the combined work under AGPL-3.0 terms, or
-3. Replace PyMuPDF with a permissively licensed PDF library.
-
-This was NOT resolved by the build; the flag is deliberate. Do not ship
-paying-client installers until the project owner decides.
-
-## PyInstaller bootloader
-
-PyInstaller is GPL-2.0 with a bootloader exception that permits distributing
-binaries produced by it without licensing the product under the GPL.
+- **All runtime dependencies are permissively licensed** (MIT, BSD-2/3,
+  Apache-2.0, MIT-CMU). No copyleft obligations arise for redistribution
+  in a closed-source or commercial binary.
+- **PyMuPDF (AGPL-3.0 / Artifex commercial) was removed** in favour of
+  pdfplumber in release 1.0.0. No AGPL-licensed code is part of the product.
+- **PyInstaller** is GPL-2.0 with a bootloader exception that explicitly
+  permits distributing binaries produced by it without GPL-licensing the
+  product.
 
 ## Application assets
 
@@ -42,3 +40,10 @@ Inter (Variable) and IBM Plex Mono font files under static/fonts are bundled
 unchanged under their respective open licenses (SIL Open Font License 1.1).
 UI icons are inline SVG symbols defined in the application; no icon font or
 third-party icon package is included. No external requests are made.
+
+## Application license
+
+CRM Local's own license is **not yet provided** — see `LICENSE` status in
+`DELIVERY_MANIFEST.md`. Until the project owner adds a `LICENSE` file, no
+redistribution rights are granted by this package beyond what the project
+owner has agreed with the client directly.
