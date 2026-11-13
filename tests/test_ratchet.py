@@ -80,7 +80,8 @@ def test_intake_missing_file_produces_error_not_silent_success(data_dir):
     finally:
         con.close()
     assert outcome.status == "ERROR"
-    assert "no such file" in (outcome.error or "").lower()
+    err = (outcome.error or "").lower()
+    assert any(s in err for s in ("no such file", "cannot find", "not found", "path specified")), err
 
 
 # Behavioral half of BUG-SEC-05: the API must refuse paths outside allowed data dirs.
