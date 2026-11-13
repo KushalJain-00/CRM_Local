@@ -19,7 +19,6 @@ const S = {
     emailsPage: 1,
     emailsPageSize: 50,
     contacts: [],
-    companies: [],
     emails: [],
     // Staged contact state
     stagedReviewPage: 1,
@@ -420,7 +419,7 @@ function parseHash() {
 
 window.addEventListener('hashchange', () => {
     const hash = parseHash();
-    if (hash && hash !== S.currentView) showView(hash);
+    if (hash && hash !== S.currentView && VIEW_TITLES[hash]) showView(hash);
 });
 
 async function refreshData() {
@@ -442,8 +441,8 @@ const _waiters = [];                    // queued callers wait for a free slot
 
 async function _acquireSlot() {
     if (activeRequests < MAX_CONCURRENT) { activeRequests++; return; }
+    // Woken waiters were already accounted for by _releaseSlot.
     await new Promise(resolve => _waiters.push(resolve));
-    activeRequests++;
 }
 
 function _releaseSlot() {
@@ -484,8 +483,8 @@ function setKpi(id, value) {
         S._kpiPrev[id] = value;
         return;
     }
-    // count-up on first load only, ≤600ms
-    const from = prev === undefined ? 0 : prev;
+    // count-up on subsequent changes, ≤600ms
+    const from = prev;
     const start = performance.now();
     const dur = 600;
     function tick(now) {
@@ -793,6 +792,7 @@ async function startExtraction() {
     const btn = document.getElementById('extractBtn');
     const progress = document.getElementById('progress');
     const fill = document.getElementById('progressFill');
+    const progressbar = document.getElementById('progress');
     const text = document.getElementById('progressText');
     const results = document.getElementById('extractResults');
     const dz = document.getElementById('dropZone');
@@ -802,6 +802,7 @@ async function startExtraction() {
     progress.hidden = false;
     fill.style.width = '0%';
     text.textContent = `0/${valid.length}`;
+    if (progressbar) progressbar.setAttribute('aria-valuenow', '0');
     valid.forEach(q => { q.status = 'processing'; });
     renderFileQueue();
 
@@ -823,6 +824,7 @@ async function startExtraction() {
         });
 
         fill.style.width = '100%';
+        if (progressbar) progressbar.setAttribute('aria-valuenow', '100');
         text.textContent = `${okCount + failCount}/${valid.length}`;
 
         results.innerHTML =
@@ -1542,12 +1544,11 @@ async function bulkApproveStaged() {
 
 // Optimistic approve / reject / dismiss: row updates immediately, real POST
 // follows. Only permanent deletes ask for confirmation.
-async function stagedDecide(stagedId, action, opts) {
-    opts = opts || {};
+async function stagedDecide(stagedId, action) {
     const row = stagedContactsCache.find(x => x.id === stagedId);
     const prevState = row ? { review_status: row.review_status } : null;
     const labels = { approve: 'approved', reject: 'rejected', dismiss: 'dismissed' };
-    if (row && !opts.silent) row.review_status = action === 'approve' ? 'APPROVED' : (action === 'reject' ? 'REJECTED' : 'DISMISSED');
+    if (row) row.review_status = action === 'approve' ? 'APPROVED' : (action === 'reject' ? 'REJECTED' : 'DISMISSED');
     renderStagedContactsTable(stagedContactsCache, S.stagedTotal, S.stagedReviewPage, S.stagedPageSize, null, false);
     try {
         await api(`/api/staged-contacts/${stagedId}/${action}`, { method: 'POST' });
@@ -1673,7 +1674,8 @@ async function loadDataQuality() {
             const el = document.getElementById(id);
             if (el) el.textContent = '—';
         });
-        showBanner('settingsBanner', 'error', 'Could not load data quality', e.message);
+        const dqList = document.getElementById('quality-detail-list');
+        if (dqList) dqList.innerHTML = `<p class="card-sub">Could not load data quality: ${esc(e.message)}</p>`;
     }
 }
 
@@ -2239,6 +2241,7 @@ function toggleDensity(tableId) {
         if (btn) btn.setAttribute('aria-pressed', cur === 'compact' ? 'true' : 'false');
         return;
     }
+    if (tableId) return;  // named table, missing container: do nothing
     const cur = document.documentElement.getAttribute('data-density') === 'compact' ? 'comfortable' : 'compact';
     document.documentElement.setAttribute('data-density', cur);
     try { localStorage.setItem('crm-density', cur); } catch (e) { /* ignore */ }
@@ -2251,7 +2254,6 @@ function toggleDensity(tableId) {
 const palette = {
     el: null, input: null, list: null,
     open: false, items: [], view: [], active: 0,
-    built: false,
 };
 
 function paletteBuildStatic() {
@@ -2336,7 +2338,7 @@ function paletteRun(idx) {
     if (it.run) it.run();
 }
 
-const paletteSearchContacts = debounce(async (q) => {
+const _paletteSearchContacts = debounce(async (q) => {
         try {
             const data = await api('/api/contacts?q=' + encodeURIComponent(q) + '&page=1&size=5');
             const rows = data.rows || [];
@@ -2348,6 +2350,7 @@ const paletteSearchContacts = debounce(async (q) => {
         } catch (e) { palette.contactResults = []; }
         paletteRender();
 }, 150);
+function paletteSearchContacts(q) { return _paletteSearchContacts(q); }
 
 function openPalette() {
     // Never open the palette under an open native modal <dialog> (e.g. the

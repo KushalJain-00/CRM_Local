@@ -288,7 +288,7 @@
         </div>
 
         <!-- ═══════ Staged review ═══════ -->
-        <div id="view-staged" class="view" data-title="Staged Review">
+        <div id="view-staged" class="view" data-title="Staged review">
           <div class="page-head">
             <div class="page-head-text">
               <h2>Staged review</h2>
@@ -387,7 +387,7 @@
           </div>
           <div class="banner error" id="contactsBanner" hidden></div>
           <div class="table-zone">
-            <div class="table-container" data-density="comfortable" id="contactsContainer">
+            <div class="table-container" data-density="comfortable">
               <table id="contactsTable">
                 <thead><tr>
                   <th class="c-check"><input type="checkbox" id="contactsCheckAll" aria-label="Select all contacts on this page"></th>
@@ -545,7 +545,6 @@
               </div>
               <h3>Invalid emails</h3>
               <p class="card-sub">Contacts whose primary email failed validation.</p>
-              <div class="quality-list" id="quality-invalid-emails-list"></div>
               <button type="button" class="btn-link" onclick="showView('contacts')">Review in Contacts</button>
             </section>
             <section class="card quality-card">
@@ -556,7 +555,6 @@
               </div>
               <h3>Invalid phones</h3>
               <p class="card-sub">Phone numbers that do not look dialable.</p>
-              <div class="quality-list" id="quality-invalid-phones-list"></div>
               <button type="button" class="btn-link" onclick="showView('contacts')">Review in Contacts</button>
             </section>
             <section class="card quality-card">
@@ -567,7 +565,6 @@
               </div>
               <h3>Missing fields</h3>
               <p class="card-sub">Records that are incomplete and may need a top-up.</p>
-              <div class="quality-list" id="quality-missing-list"></div>
               <button type="button" class="btn-link" onclick="showView('contacts')">Review in Contacts</button>
             </section>
             <section class="card quality-card">
@@ -578,7 +575,6 @@
               </div>
               <h3>Duplicates</h3>
               <p class="card-sub">Records that look like existing contacts.</p>
-              <div class="quality-list" id="quality-dupes-list"></div>
               <button type="button" class="btn-link" onclick="showView('staged')">Review staged contacts</button>
             </section>
           </div>
@@ -589,7 +585,7 @@
         </div>
 
         <!-- ═══════ History ═══════ -->
-        <div id="view-history" class="view" data-title="Processing History">
+        <div id="view-history" class="view" data-title="History">
           <div class="page-head">
             <div class="page-head-text">
               <h2>Processing history</h2>

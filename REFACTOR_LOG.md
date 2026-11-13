@@ -291,3 +291,25 @@ Subagent re-audit #2 confirmed round-1 fixes hold. Fixed here:
   api/jobs.py stub, companies.website_key write-only column, raw_source_data
   D-017 accepted debt, .txt AI-assist cap.
 - Suite: **400 passed, 1 xfailed**.
+
+## D-U8 (Phase 6 re-audit, round 2 frontend): subagent findings, fixed
+
+- **API wait-queue slot double-increment** (real bug introduced by the
+  consolidation): a woken waiter was counted by both `_releaseSlot` and
+  itself, leaking phantom slots. Fixed: waiter no longer self-counts.
+- **Data Quality error path wrote to the Settings banner** — now writes the
+  error into the quality view itself (`#quality-detail-list`).
+- **`hashchange` accepted any view id** — now validated against VIEW_TITLES
+  like the boot path.
+- **`toggleDensity` fell through to the global toggle when a named table was
+  missing** — now a no-op for unknown tableIds.
+- Dead code removed: `S.companies`, `palette.built`, `opts.silent` on
+  stagedDecide (uncalled), the four unpopulated `quality-*-list` divs
+  (no server data source exists), `contactsContainer` id; two `data-title`
+  strings synced to VIEW_TITLES; `paletteSearchContacts` is a function
+  declaration; `setKpi` dead ternary removed; `aria-valuenow` synced during
+  extraction; `density`/`theme`/`layout` audits re-confirmed clean.
+- Pre-paint sidebar mismatch: not a bug — style.css keys off
+  `html.sb-collapsed` which boot.js sets correctly.
+- Suite: **400 passed**; contract_audit MISSING DEFINITIONS: none; browser
+  E2E green again on final code (including bulk-approve UI call).
