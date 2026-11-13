@@ -7,7 +7,7 @@ from . import NormalizedContact, ExtractionResult
 
 
 def contacts_from_table(path: str, table: dict, adapter: str) -> ExtractionResult:
-    import parse
+    from services import parse
     name = os.path.basename(path)
     warnings: list[str] = []
     contacts: list[NormalizedContact] = []

@@ -92,7 +92,8 @@ def test_llm_fields_do_not_override_local(data_dir, tmp_path, monkeypatch):
     async def fake_extract(chain, prompt, **kwargs):
         return {"name": "Vikram S Shah", "city": "Pune"}, "fake/model"
 
-    monkeypatch.setattr(pipeline.llm, "extract", fake_extract)
+    import services.extract as extract_mod
+    monkeypatch.setattr(extract_mod.llm, "extract", fake_extract)
     cfg = config.load()
     cfg["chain"] = [{"provider": "openrouter", "model": "x", "api_key": "k", "enabled": True}]
     config.save(cfg)

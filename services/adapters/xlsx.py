@@ -12,7 +12,7 @@ class XlsxAdapter:
 
     async def extract(self, file_path: str) -> ExtractionResult:
         try:
-            import parse
+            from services import parse
             with open(file_path, "rb") as f:
                 table = parse.parse_xlsx(f.read())
             return contacts_from_table(file_path, table, "xlsx")

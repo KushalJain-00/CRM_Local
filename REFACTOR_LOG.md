@@ -71,3 +71,47 @@ tuple, and identity-db-write consistency across staging→approval paths.
   priority tuple, .eml-vs-.csv identity agreement, staged/canonical key
   consistency, honorific-variant canonical dedup, `is_duplicate`.
 - Full suite: **395 passed, 1 xfailed** (baseline 356 + 39 new).
+
+## D-U2 (Phase 2, done): one shared extraction lifecycle = services/extract.py
+
+`process_source()` owns the whole lifecycle: adapter parse → deterministic
+Layer-1 → optional contract-validated AI → normalized contacts → staging →
+email row (+links) → ledger (`mark_processed`, absolute path). Both entry
+points are thin:
+
+- intake.py = data-dir migration of wrapper: spool/limits/bare-name
+  resolution + batch assembly + extraction_run + per-file error capture.
+- pipeline.py = folder walk/sort/pending-ledger + RunState reporting +
+  watcher. `_process_eml`/`_process_doc`/`_ai_document_assist` deleted.
+
+Design rulings (flagged to user in final report):
+
+- **Deterministic never discarded.** Pipeline previously dropped
+  deterministic rows when LLM-assist ran (low-confidence files); both paths
+  now always stage deterministic rows and *append* contract-validated AI
+  rows (the ai_assist "gap-fill" contract). Intake behaviour wins.
+- **EML with no identity stages as NEEDS_REVIEW** (D-006/D-007 "never
+  dropped"), instead of the scan's silent skip (email row only).
+- **Ledger key = absolute path** for both paths (was: basename for intake,
+  full path for scan → cross-path double counting).
+- **to_emails/cc_emails/bcc_emails now persist for intake-sourced EML**
+  (they were dropped by the upload path; kept on the scan path).
+  `NormalizedContact` gained the three columns to carry them.
+- **Recipients normalized empty-string → NULL** on all paths.
+- **EML parsed once** — EmlAdapter stashes `parsed` on ExtractionResult;
+  the core reuses it for the email row and the LLM prompt.
+- **LLM-skip degradation warning** ("LLM skipped (…) — local fields only")
+  is appended in both paths when chain present but extraction failed
+  (previously only the scan logged it).
+- One explicit conversion boundary in `services/adapters/__init__.py`:
+  `eml_to_normalized` / `contract_to_normalized` (table-driven
+  `_CONTACT_MAP`). All field-by-field copies and the `_ai_of` hack gone.
+- `parse.py` moved to `services/parse.py` (tests import path updated).
+
+Equivalence evidence (original intake vs new, identical input files):
+table_good.csv and sparse.csv staging rows byte-identical; eml_basic
+differs ONLY by preserved to/cc/bcc (bug fix); eml_no_identity identical
+after the NULL normalization above. New `tests/test_extract_parity.py`
+(orchestrator-level parity, deterministic/offline) is committed.
+
+Suite: **399 passed, 1 xfailed** (356 base + 39 new keys + 4 parity).

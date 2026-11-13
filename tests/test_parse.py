@@ -1,6 +1,6 @@
 import openpyxl
 
-import parse
+from services import parse
 
 
 def test_csv_parses_and_maps_columns():

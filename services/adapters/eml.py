@@ -1,7 +1,9 @@
 # services/adapters/eml.py — EML extraction adapter
-"""Wraps services/eml_processor.py for .eml files."""
+"""Wraps services/eml_processor.py for .eml files. Deterministic Layer-1 only;
+the pipeline runs the contract-validated AI stage and the email-row link."""
 import os
-from . import NormalizedContact, ExtractionResult
+
+from . import NormalizedContact, ExtractionResult, eml_to_normalized
 
 
 class EmlAdapter:
@@ -11,33 +13,20 @@ class EmlAdapter:
         return file_path.lower().endswith(".eml")
 
     async def extract(self, file_path: str) -> ExtractionResult:
-        from services.eml_processor import parse_eml_bytes, extract_local_fields, build_llm_prompt, merge_fields, FIELD_KEYS
+        from services.eml_processor import parse_eml_bytes, extract_local_fields, merge_fields
         try:
             with open(file_path, "rb") as f:
                 raw = f.read()
             parsed = parse_eml_bytes(raw, os.path.basename(file_path))
-            local = extract_local_fields(parsed)
-            # Layer 1 only (no LLM in adapter; LLM enrichment handled by orchestrator)
-            contact = merge_fields(local, None)
-            contact["to_emails"] = parsed.to_emails
-            contact["cc_emails"] = parsed.cc_emails
-            contact["bcc_emails"] = parsed.bcc_emails
-            nc = NormalizedContact(
-                name=contact.get("name"),
-                email_primary=contact.get("email"),
-                phone_primary=contact.get("phone_primary"),
-                phone_secondary=contact.get("phone_secondary"),
-                company=contact.get("company"),
-                designation=contact.get("designation"),
-                address=contact.get("address"),
-                city=contact.get("city"),
-                pincode=contact.get("pincode"),
-                website=contact.get("website"),
-                source_file=os.path.basename(file_path),
-                field_origin={k: "local" for k in FIELD_KEYS if contact.get(k)},
+            merged = merge_fields(extract_local_fields(parsed), None)
+            nc = eml_to_normalized(
+                merged, None, source_file=os.path.basename(file_path),
+                to_emails=parsed.to_emails or None,
+                cc_emails=parsed.cc_emails or None,
+                bcc_emails=parsed.bcc_emails or None,
             )
-            return ExtractionResult(contacts=[nc], adapter="eml", local_only=True)
+            return ExtractionResult(contacts=[nc], adapter="eml",
+                                    local_only=True, parsed=parsed)
         except Exception as e:
-            return ExtractionResult(contacts=[], warnings=[str(e)], adapter="eml", local_only=True)
-
-
+            return ExtractionResult(contacts=[], warnings=[str(e)],
+                                    adapter="eml", local_only=True)

@@ -32,6 +32,9 @@ class NormalizedContact:
     extraction_run_id: int | None = None
     field_origin: dict | None = None
     confidence: float = 0.0
+    to_emails: str | None = None
+    cc_emails: str | None = None
+    bcc_emails: str | None = None
 
 
 @dataclass
@@ -41,6 +44,68 @@ class ExtractionResult:
     warnings: list[str] = field(default_factory=list)
     adapter: str = ""
     local_only: bool = False
+    # .eml adapters stash the parsed message here so the pipeline can link the
+    # email row and build the LLM prompt without re-parsing the file.
+    parsed: object | None = None
+
+
+# crm-extraction.v1 / merged FIELD_KEYS → normalized-contact boundary.
+# One table, one place; every producer of contacts flows through it.
+_CONTACT_MAP = (
+    ("name", "name"),
+    ("email", "email_primary"),
+    ("phone_primary", "phone_primary"),
+    ("phone_secondary", "phone_secondary"),
+    ("company", "company"),
+    ("designation", "designation"),
+    ("address", "address"),
+    ("city", "city"),
+    ("pincode", "pincode"),
+    ("website", "website"),
+)
+
+_ORIGIN_KEYS = ("name", "email", "phone_primary", "company",
+                "designation", "address", "city", "pincode", "website")
+
+
+def origin_map(ai: dict | None, merged: dict) -> dict:
+    return {k: ("ai" if (ai and ai.get(k)) else "local")
+            for k in _ORIGIN_KEYS if merged.get(k)}
+
+
+def eml_to_normalized(merged: dict, ai: dict | None, *, source_file: str,
+                      to_emails: str | None = None,
+                      cc_emails: str | None = None,
+                      bcc_emails: str | None = None) -> NormalizedContact:
+    """Local+AI merged FIELD_KEYS dict → internal contact (recipients preserved)."""
+    nc = NormalizedContact(source_file=source_file, field_origin=origin_map(ai, merged))
+    for merged_key, field_name in _CONTACT_MAP:
+        setattr(nc, field_name, merged.get(merged_key))
+    nc.to_emails = to_emails
+    nc.cc_emails = cc_emails
+    nc.bcc_emails = bcc_emails
+    return nc
+
+
+def contract_to_normalized(ac: dict, *, source_file: str) -> NormalizedContact:
+    """assist_document output (already contract-validated) → internal contact."""
+    return NormalizedContact(
+        name=ac.get("name"),
+        email_primary=ac.get("email_primary"),
+        email_secondary=ac.get("email_secondary"),
+        phone_primary=ac.get("phone_primary"),
+        phone_secondary=ac.get("phone_secondary"),
+        whatsapp=ac.get("whatsapp"),
+        company=ac.get("company"),
+        designation=ac.get("designation"),
+        address=ac.get("address"),
+        city=ac.get("city"),
+        pincode=ac.get("pincode"),
+        website=ac.get("website"),
+        source_file=source_file,
+        field_origin=ac.get("field_origin"),
+        confidence=ac.get("confidence") or 0.3,
+    )
 
 
 @runtime_checkable

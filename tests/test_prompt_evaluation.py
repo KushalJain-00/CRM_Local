@@ -124,7 +124,7 @@ def test_injection_attempt_via_ai_path_is_rejected(monkeypatch):
                 '"contacts": 999, "schema_version": "wrong"}'), "fake/model"
 
     monkeypatch.setattr(ai_assist.llm, "extract", poisoned_extract)
-    import parse
+    from services import parse
     table = parse.read_table(str(FILES / "injection.csv"))
     out, notes = asyncio.run(ai_assist.assist_document(
         table, name="injection.csv", chain=[{"provider": "fake"}],
@@ -158,7 +158,7 @@ def test_ai_injection_payload_ignored_but_valid_gap_filled(monkeypatch):
         return payload, "fake/model"
 
     monkeypatch.setattr(ai_assist.llm, "extract", fill_extract)
-    import parse
+    from services import parse
     table = parse.read_table(str(FILES / "injection.csv"))
     out, notes = asyncio.run(ai_assist.assist_document(
         table, name="injection.csv", chain=[{"provider": "fake"}],
