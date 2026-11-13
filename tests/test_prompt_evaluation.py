@@ -15,11 +15,9 @@ CORPUS = Path(__file__).parent / "evaluation"
 TRUTH = json.loads((CORPUS / "ground_truth.json").read_text())
 FILES = CORPUS / "files"
 
-
 def _digits(s: str) -> str:
     import re
     return re.sub(r"\D", "", s or "")
-
 
 @pytest.mark.parametrize("file_name", sorted(TRUTH["documents"]))
 def test_document_extraction_expectations(file_name):
@@ -62,7 +60,6 @@ def test_document_extraction_expectations(file_name):
         assert token.lower() not in excluded.lower(), (
             f"{file_name}: excluded token {token!r} appeared in extraction")
 
-
 @pytest.mark.parametrize("file_name", sorted(TRUTH["eml"]))
 def test_eml_extraction_expectations(file_name):
     spec = TRUTH["eml"][file_name]
@@ -104,7 +101,6 @@ def test_eml_extraction_expectations(file_name):
         assert token.lower() not in excluded.lower(), (
             f"{file_name}: excluded token {token!r} appeared in extraction")
 
-
 def test_injection_cell_never_produces_phantom_contacts():
     """The malicious Notes cell must not create extra contacts or emails."""
     result = asyncio.run(get_adapter(str(FILES / "injection.csv")).extract(str(FILES / "injection.csv")))
@@ -112,7 +108,6 @@ def test_injection_cell_never_produces_phantom_contacts():
     got = result.contacts[0]
     assert got.email_primary == "real@kexample.com"
     assert got.name == "Real Person"
-
 
 def test_injection_attempt_via_ai_path_is_rejected(monkeypatch):
     """A provider that answers the injection with contract-invalid JSON
@@ -131,7 +126,6 @@ def test_injection_attempt_via_ai_path_is_rejected(monkeypatch):
         cfg={"reliability": {}}, source_type="spreadsheet"))
     assert out == []
     assert notes  # explains the failure honestly
-
 
 def test_ai_injection_payload_ignored_but_valid_gap_filled(monkeypatch):
     """A well-formed provider payload fills the gap; a poisoned one must not
@@ -165,12 +159,11 @@ def test_ai_injection_payload_ignored_but_valid_gap_filled(monkeypatch):
         cfg={"reliability": {}}, source_type="spreadsheet"))
     assert out and out[0]["email_primary"] == "real@kexample.com"
 
-
 def test_prompt_assembly_guards_both_masters():
     """Both assembled prompts carry the untrusted markers and the anti-injection
     hierarchy; neither leaks instructions from the source as authority."""
     from services.prompts.store import text as prompt_text
-    from services.prompts.contact_extraction import MASTER_SYSTEM_PROMPT
+
     from services.eml_processor import build_llm_prompt, ParsedEml
 
     eml_system = prompt_text("eml")

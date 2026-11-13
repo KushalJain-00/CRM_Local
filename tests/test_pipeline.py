@@ -1,5 +1,5 @@
 import asyncio
-import shutil
+
 from pathlib import Path
 
 import config
@@ -22,7 +22,6 @@ Beta LLP
 Mumbai
 """
 
-
 def _setup(tmp_path, monkeypatch):
     crm_dir = tmp_path / "crm"
     eml_dir = tmp_path / "eml"
@@ -32,7 +31,6 @@ def _setup(tmp_path, monkeypatch):
     cfg.update({"crm_dir": str(crm_dir), "eml_dir": str(eml_dir), "chain": []})
     config.save(cfg)
     return crm_dir, eml_dir
-
 
 def test_scan_processes_eml_and_pushes_to_crm(data_dir, tmp_path, monkeypatch):
     crm_dir, eml_dir = _setup(tmp_path, monkeypatch)
@@ -58,7 +56,6 @@ def test_scan_processes_eml_and_pushes_to_crm(data_dir, tmp_path, monkeypatch):
     assert len(links) == 1
     con.close()
 
-
 def test_second_scan_is_a_no_op(data_dir, tmp_path, monkeypatch):
     _, eml_dir = _setup(tmp_path, monkeypatch)
     (eml_dir / "a.eml").write_text(SAMPLE_EML, "utf-8")
@@ -71,7 +68,6 @@ def test_second_scan_is_a_no_op(data_dir, tmp_path, monkeypatch):
     assert result["stats"]["files"] == 0
     assert db.counts() == before
 
-
 def test_eml_processed_in_date_order(data_dir, tmp_path, monkeypatch):
     _, eml_dir = _setup(tmp_path, monkeypatch)
     older = SAMPLE_EML.replace("Mon, 02 Mar 2026", "Mon, 01 Jan 2024")
@@ -83,7 +79,6 @@ def test_eml_processed_in_date_order(data_dir, tmp_path, monkeypatch):
 
     paths = pipeline._pending(str(eml_dir), "eml", pipeline.EML_EXTS)
     assert [Path(p).name for p in paths] == ["a-older.eml", "z-newer.eml"]
-
 
 def test_llm_fields_do_not_override_local(data_dir, tmp_path, monkeypatch):
     _, eml_dir = _setup(tmp_path, monkeypatch)
@@ -105,7 +100,6 @@ def test_llm_fields_do_not_override_local(data_dir, tmp_path, monkeypatch):
     con.close()
     assert row["name"] == "Vikram Shah"  # local wins (D-007)
     assert row["city"] == "Mumbai"  # local wins (D-007)
-
 
 def test_missing_folder_is_reported_not_crashed(data_dir, tmp_path, monkeypatch):
     cfg = config.load()

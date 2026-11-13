@@ -4,10 +4,8 @@
 Adapters implement the ExtractionAdapter protocol and return ExtractionResult
 containing a list of NormalizedContact records with provenance.
 """
-from typing import Protocol, runtime_checkable, Optional
+from typing import Protocol, runtime_checkable
 from dataclasses import dataclass, field
-import os
-
 
 @dataclass
 class NormalizedContact:
@@ -36,7 +34,6 @@ class NormalizedContact:
     cc_emails: str | None = None
     bcc_emails: str | None = None
 
-
 @dataclass
 class ExtractionResult:
     """Result from an extraction adapter."""
@@ -47,7 +44,6 @@ class ExtractionResult:
     # .eml adapters stash the parsed message here so the pipeline can link the
     # email row and build the LLM prompt without re-parsing the file.
     parsed: object | None = None
-
 
 # crm-extraction.v1 / merged FIELD_KEYS → normalized-contact boundary.
 # One table, one place; every producer of contacts flows through it.
@@ -69,7 +65,6 @@ _MAGIC = {
     "pdf": [b"%PDF"],
 }
 
-
 def check_signature(file_path: str, ext: str) -> None:
     """Reject files whose bytes do not match the extension they claim.
     Raises ValueError; adapters call this before opening their parser."""
@@ -78,15 +73,12 @@ def check_signature(file_path: str, ext: str) -> None:
     if not any(head[:len(m)] == m for m in _MAGIC[ext]):
         raise ValueError(f"file content does not match .{ext} format")
 
-
 _ORIGIN_KEYS = ("name", "email", "phone_primary", "company",
                 "designation", "address", "city", "pincode", "website")
-
 
 def origin_map(ai: dict | None, merged: dict) -> dict:
     return {k: ("ai" if (ai and ai.get(k)) else "local")
             for k in _ORIGIN_KEYS if merged.get(k)}
-
 
 def eml_to_normalized(merged: dict, ai: dict | None, *, source_file: str,
                       to_emails: str | None = None,
@@ -100,7 +92,6 @@ def eml_to_normalized(merged: dict, ai: dict | None, *, source_file: str,
     nc.cc_emails = cc_emails
     nc.bcc_emails = bcc_emails
     return nc
-
 
 def contract_to_normalized(ac: dict, *, source_file: str) -> NormalizedContact:
     """assist_document output (already contract-validated) → internal contact."""
@@ -122,19 +113,16 @@ def contract_to_normalized(ac: dict, *, source_file: str) -> NormalizedContact:
         confidence=ac.get("confidence") or 0.3,
     )
 
-
 @runtime_checkable
 class ExtractionAdapter(Protocol):
     """Common extraction adapter interface."""
     def can_handle(self, file_path: str) -> bool: ...
     async def extract(self, file_path: str) -> ExtractionResult: ...
 
-
 # Import all adapters to register them
 from . import xls, pdf, csv, txt, xlsx, eml  # noqa: F401
 
 _ADAPTERS = []
-
 
 def _collect_adapters():
     """Collect all registered adapter instances."""
@@ -150,14 +138,12 @@ def _collect_adapters():
     _ADAPTERS = [XlsAdapter(), PdfAdapter(), CsvAdapter(), TxtAdapter(), XlsxAdapter(), EmlAdapter()]
     return _ADAPTERS
 
-
 def get_adapter(file_path: str):
     """Return the first adapter that can handle the file, or None."""
     for adapter in _collect_adapters():
         if adapter.can_handle(file_path):
             return adapter
     return None
-
 
 def dispatch(file_path: str) -> str:
     """Return the adapter name for a file path, or 'unknown'."""

@@ -3,7 +3,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
 import db
 
@@ -13,16 +13,12 @@ router = APIRouter()
 _MAX_SIZE = 500
 _DEFAULT_SIZE = 25
 
-
-
-
 def _link_table(con) -> Optional[str]:
     for table in ("email_staged_links", "contact_emails"):
         if con.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
             return table
     return None
-
 
 @router.get("/emails")
 async def list_emails(

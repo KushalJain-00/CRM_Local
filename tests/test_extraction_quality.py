@@ -8,8 +8,6 @@ import json
 import re
 from pathlib import Path
 
-import pytest
-
 from services.adapters import get_adapter
 
 CORPUS = Path(__file__).parent / "corpus"
@@ -19,16 +17,13 @@ TRUTH = json.loads((CORPUS / "ground_truth.json").read_text())
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 FIELDS = ["name", "email_primary", "phone_primary", "company", "city", "pincode"]
 
-
 def _digits(s: str) -> str:
     return re.sub(r"\D", "", s or "")
-
 
 def _load(file_name: str):
     adapter = get_adapter(str(FILES / file_name))
     result = asyncio.run(adapter.extract(str(FILES / file_name)))
     return result
-
 
 def _match(found: list, expected: list[dict]) -> list[tuple]:
     """Greedy one-to-one match: by email first, then name; else by order."""
@@ -53,7 +48,6 @@ def _match(found: list, expected: list[dict]) -> list[tuple]:
             used.add(best)
     return pairs
 
-
 def _source_text(path: Path) -> str:
     """Extract all human-readable text from a corpus file (per format)."""
     ext = path.suffix.lower()
@@ -75,7 +69,6 @@ def _source_text(path: Path) -> str:
         with pdfplumber.open(io.BytesIO(path.read_bytes())) as pdf:
             return "\n".join(p.extract_text() or "" for p in pdf.pages)
     return path.read_bytes().decode("utf-8", errors="ignore")
-
 
 def _harvest():
     report = {}
@@ -128,7 +121,6 @@ def _harvest():
         file_stats["fabrication"] = [f for f in fabrication if f.startswith(file_name)]
         report[file_name] = file_stats
     return report, totals, fabrication
-
 
 def test_extraction_corpus_report():
     report, totals, fabrication = _harvest()

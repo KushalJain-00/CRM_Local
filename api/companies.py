@@ -1,15 +1,12 @@
 from pydantic import BaseModel
 # api/companies.py — Company management (D-032)
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+
 import db
 from datetime import datetime
 
 router = APIRouter()
-
-
-
 
 # ── Schemas ──────────────────────────────────────────────────────────────
 
@@ -21,7 +18,6 @@ class CompanyIn(BaseModel):
     website: Optional[str] = None
     industry: Optional[str] = None
     product: Optional[str] = None
-
 
 # ── Routes ───────────────────────────────────────────────────────────────
 
@@ -59,7 +55,6 @@ async def list_companies(
     finally:
         con.close()
 
-
 import math
 
 @router.get("/companies/{company_id}")
@@ -73,7 +68,6 @@ async def get_company(company_id: int):
         return dict(row)
     finally:
         con.close()
-
 
 @router.post("/companies")
 async def create_company(
@@ -100,7 +94,6 @@ async def create_company(
         return {"ok": True, "company": result}
     finally:
         con.close()
-
 
 @router.put("/companies/{company_id}")
 async def update_company(
@@ -156,7 +149,6 @@ async def update_company(
         return {"ok": True}
     finally:
         con.close()
-
 
 @router.delete("/companies/{company_id}")
 async def delete_company(

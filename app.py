@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -30,11 +30,8 @@ from api import system, settings, intake as api_intake, jobs, staged, contacts, 
 BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 STATIC = BASE / "static"
 
-
-
 # Loopback hosts for SEC-03 (D-028c): rejected before Host is considered.
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
-
 
 # Lifespan context manager replacing the deprecated on_event("startup") / on_event("shutdown").
 # Guarantees initialization runs before the first request and cleanup on shutdown.
@@ -49,9 +46,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         pipeline.start_watch()
     yield
 
-
 app = FastAPI(title="CRM Local", openapi_url=None, lifespan=_lifespan)  # type: ignore
-
 
 def _allowed_origins(host_header: str) -> set[str]:
     port = urlsplit("//" + host_header).port if host_header else None
@@ -62,7 +57,6 @@ def _allowed_origins(host_header: str) -> set[str]:
         # Browsers omit the default port in the Origin header.
         origins.update({"http://127.0.0.1", "http://localhost"})
     return origins
-
 
 @app.middleware("http")
 async def security_headers(request, call_next):
@@ -78,10 +72,8 @@ async def security_headers(request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
 
-
 class ScanIn(BaseModel):
     which: str = "all"
-
 
 class ConfigIn(BaseModel):
     crm_dir: str | None = None
@@ -91,10 +83,8 @@ class ConfigIn(BaseModel):
     watch_interval: int | None = None
     theme: str | None = None
 
-
 class FolderIn(BaseModel):
     initial: str = ""
-
 
 # SEC-01 / D-028a: key material never leaves the server on any config or
 # settings response (GET *and* POST echo). Reads return each chain credential
@@ -105,7 +95,6 @@ class FolderIn(BaseModel):
 # as given. (Contract: docs/SECURITY_REVIEW.md SEC-01 + D-028a; the Phase-2
 # chain-absence from INTERFACE_CONTRACTS §4.12 lands with /api/providers.)
 MASKED_KEY = "********"
-
 
 def _mask_chain(chain: list | None) -> list:
     masked = []
@@ -120,12 +109,10 @@ def _mask_chain(chain: list | None) -> list:
         masked.append(e)
     return masked
 
-
 def _mask_cfg(cfg: dict) -> dict:
     out = dict(cfg)
     out["chain"] = _mask_chain(out.get("chain"))
     return out
-
 
 def _merge_chain(incoming: list | None, stored: list | None) -> list:
     stored = [e for e in (stored or []) if isinstance(e, dict)]
@@ -154,11 +141,9 @@ def _merge_chain(incoming: list | None, stored: list | None) -> list:
         merged.append(e)
     return merged
 
-
 # SEC-09 (D-028c): force config.json to 0600 at startup is now handled by the
 # lifespan context manager below, which guarantees db.init() runs before the first
 # request and config.lock_down() runs at startup.
-
 
 # ── routes that STAY in app.py (composition root only) ────────────────────
 
@@ -166,9 +151,7 @@ def _merge_chain(incoming: list | None, stored: list | None) -> list:
 async def index():
     return FileResponse(STATIC / "index.html")
 
-
-# /api/status is served by api/system.py (registered below) — it was duplicated
-# here and crashed on a stale llm.PROVIDERS reference (AttributeError → 500).
+# /api/status is served by api/system.py (registered below).
 
 # ── /api/config retired → hard 410 (D-011) ────────────────────────────────
 
@@ -176,11 +159,9 @@ async def index():
 async def get_config_retired():
     return JSONResponse({"error": "CONFIG_RETIRED", "detail": "use /api/settings instead"}, status_code=410)
 
-
 @app.post("/api/config")
 async def set_config_retired(body: ConfigIn):
     return JSONResponse({"error": "CONFIG_RETIRED", "detail": "use /api/settings instead"}, status_code=410)
-
 
 # ── routes moved to api/ packages (D-010) ────────────────────────────────
 
@@ -198,14 +179,12 @@ app.include_router(history.router, prefix="/api", tags=["history"])
 #    exe, which execs this module as __main__) registers the mount before
 #    uvicorn.run() blocks. Mounting after `if __name__ == "__main__"` never ran.
 
-
 @app.post("/api/pick-folder")
 async def pick_folder(body: FolderIn):
     path = await asyncio.to_thread(pipeline.folder_picker, body.initial)
     if not path:
         return {"path": "", "cancelled": True}
     return {"path": path}
-
 
 @app.post("/api/open-folder")
 async def open_folder(body: FolderIn):
@@ -220,9 +199,7 @@ async def open_folder(body: FolderIn):
         subprocess.Popen(["xdg-open", path])
     return {"ok": True}
 
-
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
-
 
 def _free_port(preferred: int = 8000, tries: int = 11) -> int:
     import socket
@@ -235,7 +212,6 @@ def _free_port(preferred: int = 8000, tries: int = 11) -> int:
                 continue
     return preferred
 
-
 def main() -> None:
     import uvicorn
     port = int(os.environ.get("PORT", 0)) or _free_port()
@@ -247,7 +223,6 @@ def main() -> None:
     else:
         print(f"\n  CRM Local — http://127.0.0.1:{port}\n")
     uvicorn.run(app, host=host, port=port, log_level="warning")
-
 
 if __name__ == "__main__":
     main()

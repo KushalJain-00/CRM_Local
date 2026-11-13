@@ -1,7 +1,7 @@
 # tests/test_api_integration.py — end-to-end API contract tests on a temporary
 # SQLite database (conftest `data_dir`: monkeypatched config.data_dir + db.init(),
 # which auto-applies the migration train on non-live files).
-import json
+
 import re
 from pathlib import Path
 
@@ -13,7 +13,6 @@ from app import app
 
 client = TestClient(app)
 ROOT = Path(__file__).resolve().parents[1]
-
 
 def _seed_contact(con, **kw):
     defaults = dict(
@@ -32,7 +31,6 @@ def _seed_contact(con, **kw):
     con.commit()
     return cur.lastrowid
 
-
 def _seed_staged(con, **kw):
     defaults = dict(
         source_type="xlsx", source_file="leads.xlsx", source_row=1,
@@ -47,7 +45,6 @@ def _seed_staged(con, **kw):
     cur = con.execute(f"INSERT INTO staged_contacts ({cols}) VALUES ({marks})", list(defaults.values()))
     con.commit()
     return cur.lastrowid
-
 
 def _seed_email(con, **kw):
     defaults = dict(
@@ -64,7 +61,6 @@ def _seed_email(con, **kw):
     con.commit()
     return cur.lastrowid
 
-
 def _seed_processed(con, **kw):
     defaults = dict(path="/tmp/f1.xlsx", size=100, mtime=1000.0, status="ok",
                     detail=None, contacts_found=4, processed_at="2026-04-01T00:00:00")
@@ -74,7 +70,6 @@ def _seed_processed(con, **kw):
     con.execute(f"INSERT INTO processed_files ({cols}) VALUES ({marks})", list(defaults.values()))
     con.commit()
 
-
 # ── contacts ─────────────────────────────────────────────────────────────────
 
 def test_contacts_empty_db(data_dir):
@@ -83,7 +78,6 @@ def test_contacts_empty_db(data_dir):
     body = r.json()
     assert body["rows"] == [] and body["total"] == 0
     assert body["page"] == 1 and body["pageSize"] == 25 and body["totalPages"] == 0
-
 
 def test_contacts_pagination_search_sort(data_dir):
     con = db.connect("crm")
@@ -110,7 +104,6 @@ def test_contacts_pagination_search_sort(data_dir):
     assert client.get("/api/contacts?page=0").status_code == 422
     assert client.get("/api/contacts?size=10000").status_code == 422
 
-
 def test_contacts_soft_delete_and_patch(data_dir):
     con = db.connect("crm")
     cid = _seed_contact(con, name="Delete Me", email_primary="gone@example.com")
@@ -134,7 +127,6 @@ def test_contacts_soft_delete_and_patch(data_dir):
     assert client.get(f"/api/contacts/{cid}").status_code == 404
     assert client.delete(f"/api/contacts/{cid}").status_code == 404
 
-
 # ── emails ───────────────────────────────────────────────────────────────────
 
 def test_emails_empty_db(data_dir):
@@ -142,7 +134,6 @@ def test_emails_empty_db(data_dir):
     assert r.status_code == 200
     body = r.json()
     assert body["rows"] == [] and body["total"] == 0
-
 
 def test_emails_populated_with_contact_counts(data_dir):
     con = db.connect("crm")
@@ -165,14 +156,12 @@ def test_emails_populated_with_contact_counts(data_dir):
     assert client.get("/api/emails?page=0").status_code == 422
     assert client.get("/api/emails?size=501").status_code == 422
 
-
 # ── history ─────────────────────────────────────────────────────────────────
 
 def test_history_empty_db(data_dir):
     r = client.get("/api/history")
     assert r.status_code == 200
     assert r.json() == {"results": [], "total": 0}
-
 
 def test_history_lists_processed_files(data_dir):
     con = db.connect("crm")
@@ -190,7 +179,6 @@ def test_history_lists_processed_files(data_dir):
     assert body["results"][1]["file"] == "older.xlsx"
     assert body["results"][1]["contacts_found"] == 7
 
-
 # ── dedup rules + status ────────────────────────────────────────────────────
 
 def test_dedup_rules_shape(data_dir):
@@ -198,7 +186,6 @@ def test_dedup_rules_shape(data_dir):
     assert r.status_code == 200
     rows = r.json()["rows"]
     assert rows and all({"field", "severity", "status"} <= set(row) for row in rows)
-
 
 def test_status_extended_counts(data_dir):
     con = db.connect("crm")
@@ -216,7 +203,6 @@ def test_status_extended_counts(data_dir):
         assert key in counts, f"missing counts key {key}"
     assert counts["crm"] == 1 and counts["processed_files"] == 1 and counts["staged"] == 1
 
-
 # ── staged contacts: list / patch / approve / reject / dismiss ──────────────
 
 def test_staged_list_pagination(data_dir):
@@ -229,7 +215,6 @@ def test_staged_list_pagination(data_dir):
     assert body["total"] == 3 and len(body["rows"]) == 2 and body["totalPages"] == 2
     assert client.get("/api/staged-contacts?page=0").status_code == 422
     assert client.get("/api/staged-contacts?size=101").status_code == 422
-
 
 def test_staged_approve_creates_canonical_contact(data_dir):
     con = db.connect("crm")
@@ -257,7 +242,6 @@ def test_staged_approve_creates_canonical_contact(data_dir):
         "SELECT count(*) FROM contacts WHERE lower(email_primary) = 'approve@example.com'").fetchone()[0] == 1
     con.close()
 
-
 def test_staged_approve_enriches_existing_local_wins(data_dir):
     con = db.connect("crm")
     cid = _seed_contact(con, name="Existing Person", email_primary="keep@example.com",
@@ -278,7 +262,6 @@ def test_staged_approve_enriches_existing_local_wins(data_dir):
     assert row["name"] == "Existing Person"
     assert staged["import_status"] == "EXISTING_CONTACT_ENRICHED"
 
-
 def test_staged_reject_and_dismiss_block_approval(data_dir):
     con = db.connect("crm")
     sid_r = _seed_staged(con, email="rej@example.com")
@@ -295,7 +278,6 @@ def test_staged_reject_and_dismiss_block_approval(data_dir):
     client.post(f"/api/staged-contacts/{sid_a}/approve")
     assert client.post(f"/api/staged-contacts/{sid_a}/reject").status_code == 409
     assert client.post(f"/api/staged-contacts/{sid_a}/dismiss").status_code == 409
-
 
 def test_staged_patch_fields(data_dir):
     con = db.connect("crm")
@@ -314,7 +296,6 @@ def test_staged_patch_fields(data_dir):
                         json={"fields": {"bogus_col": "x"}}).status_code == 422
     assert client.patch("/api/staged-contacts/999999",
                         json={"fields": {"name": "x"}}).status_code == 404
-
 
 def test_staged_bulk_action_dispatch(data_dir):
     """Regression: bulk-action used to ignore `action` and always approve."""
@@ -336,7 +317,6 @@ def test_staged_bulk_action_dispatch(data_dir):
     assert client.post("/api/staged-contacts/bulk-action",
                        json={"staged_ids": [sid], "action": "explode"}).status_code == 422
 
-
 def test_staged_missing_table_degrades_to_503(data_dir, monkeypatch):
     """If the staging schema is absent (live DB pending the gated migration),
     routes answer 503 with an actionable message — never a bare 500."""
@@ -348,7 +328,6 @@ def test_staged_missing_table_degrades_to_503(data_dir, monkeypatch):
     with pytest.raises(HTTPException) as exc:
         staged_api._require_staged_table(con)
     assert exc.value.status_code == 503
-
 
 # ── frontend ↔ backend contract ─────────────────────────────────────────────
 
@@ -363,7 +342,6 @@ def _frontend_api_paths():
             p = p[:-1] + "/{}"
         paths.add(p)
     return paths
-
 
 def test_every_frontend_api_call_maps_to_a_route():
     routes = {}

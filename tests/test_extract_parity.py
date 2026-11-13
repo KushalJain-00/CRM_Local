@@ -1,7 +1,6 @@
 # tests/test_extract_parity.py — intake (upload) and pipeline (folder scan)
 # must stage byte-identical contacts through the shared extraction core.
 import asyncio
-import sqlite3
 
 import pytest
 
@@ -19,22 +18,18 @@ STAGED_COLS = (
 
 LEDGER_COLS = ("status", "contacts_found")
 
-
 def _dump(con, sql, cols):
     rows = con.execute(sql).fetchall()
     return [tuple(r) for r in rows]
-
 
 def _staged_dump(con):
     return _dump(con, f"SELECT {', '.join(STAGED_COLS)} FROM staged_contacts ORDER BY id",
                  STAGED_COLS)
 
-
 def _ledger_dump(con):
     return _dump(con, """SELECT status, contacts_found
                          FROM processed_files ORDER BY status, contacts_found""",
                  LEDGER_COLS)
-
 
 def _fresh_env(tmp_path, name):
     data_dir = tmp_path / name
@@ -49,7 +44,6 @@ def _fresh_env(tmp_path, name):
     db.init()
     return crm_dir, eml_dir
 
-
 def _run_intake(tmp_path, filename, payload):
     crm_dir, _ = _fresh_env(tmp_path, "intake")
     f = crm_dir / filename
@@ -60,7 +54,6 @@ def _run_intake(tmp_path, filename, payload):
     staged, ledger = _staged_dump(con), _ledger_dump(con)
     con.close()
     return staged, ledger
-
 
 def _run_scan(tmp_path, filename, payload):
     crm_dir, eml_dir = _fresh_env(tmp_path, "scan")
@@ -75,7 +68,6 @@ def _run_scan(tmp_path, filename, payload):
     staged, ledger = _staged_dump(con), _ledger_dump(con)
     con.close()
     return staged, ledger
-
 
 _EML = b"""From: Priya Nair <priya@acme.in>
 To: me@mycorp.com
@@ -104,7 +96,6 @@ _FILES = {
     "eml_basic.eml": _EML,
     "eml_no_identity.eml": _EML_NO_IDENTITY,
 }
-
 
 @pytest.mark.parametrize("filename", sorted(_FILES))
 def test_intake_and_scan_stage_identically(tmp_path, filename):

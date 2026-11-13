@@ -147,3 +147,29 @@ Suite: **399 passed, 1 xfailed** (356 base + 39 new keys + 4 parity).
 
 Behaviour notes for report: api emails/history/companies now enforce the
 same FK pragma as the rest of the app (previously silently off there).
+
+## D-U4 (Phase 4, done): verified surplus removed
+
+Dependency analysis (grep, then AST-based unused-import scan) backed every
+removal. No production callers anywhere outside the removed code itself.
+
+Removed dead interfaces (db.py):
+- `upsert_contact` (only tests), `insert_eml_contact` (only tests),
+  `mark_pushed` (zero refs), `_find` (only upsert), `DedupIndex` (write-only
+  in production: pipeline loaded + added, nobody read; duplicate_reason
+  test-only), `list_contacts`/`get_contact`/`update_contact`/`delete_contact`
+  (api/contacts does its own SQL).
+- Removed exclusively-covering tests: test_db.py::test_upsert_enriches_…,
+  test_db.py::test_dedup_index_matches_email_phone_and_name,
+  test_dedup_rules.py::test_dedup_index_load_and_match
+  (407 → 404 passed; no other coverage touched).
+
+- llm.py: `PROVIDERS` compat alias (api/system reads providers.PROVIDERS
+  directly), `SYSTEM_PROMPT` vestigial global, `describe_failure` (unused
+  params, zero callers). app.py post-mortem comment trimmed to fact.
+- Removed all unused imports project-wide (AST scan; re-export modules
+  `api/__init__.py`, `services/prompts/__init__.py`, adapters' side-effect
+  imports kept by design). Braces-commented from-import in dedup.py fixed by
+  hand after the automated pass.
+- Suite 404 passed (down 3 = dead-code tests), contract audit identical to
+  baseline. Frontend untouched.

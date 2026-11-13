@@ -3,19 +3,17 @@ import os
 from pathlib import Path
 
 import config
-from typing import Any, Dict, List
+from typing import List
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 
 router = APIRouter()
-
 
 from services.limits import MAX_FILE_COUNT, MAX_FILE_SIZE, MAX_TOTAL_SIZE
 
 MAX_FILES = MAX_FILE_COUNT
 MAX_SIZE_PER_FILE_MB = MAX_FILE_SIZE // (1024 * 1024)
 MAX_SIZE_TOTAL_MB = MAX_TOTAL_SIZE // (1024 * 1024)
-
 
 def _spool_uploads(upload_files):
     """Write UploadFile bytes to spool files under the data directory.
@@ -43,7 +41,6 @@ def _spool_uploads(upload_files):
         sizes.append(size)
     return spooled, sizes
 
-
 def _unspool(spooled):
     for p in spooled:
         try:
@@ -51,9 +48,7 @@ def _unspool(spooled):
         except OSError:
             pass
 
-
 from intake import universal_intake as _universal_intake
-
 
 @router.post("/intake")
 async def universal_intake(

@@ -3,14 +3,14 @@
 # (EXACT/PROBABLE/CONFLICT/UNIQUE). It never decides a merge.
 from difflib import SequenceMatcher
 
-from services.keys import (  # re-exported for callers/tests of the public engine API
-    normalize_email, normalize_phone, phone_key, name_key, company_key,
-    website_key,
+# re-exported for callers/tests of the public engine API (single implementation)
+from services.keys import (
+    normalize_email, phone_key, name_key, company_key, website_key,
 )
 
 __all__ = [
     "EXACT_DUPLICATE", "PROBABLE_DUPLICATE", "UNIQUE", "CONFLICT",
-    "normalize_email", "normalize_phone", "phone_key", "name_key",
+    "normalize_email", "phone_key", "name_key",
     "company_key", "website_key", "email_key", "compare", "find_matches",
 ]
 
@@ -21,26 +21,20 @@ CONFLICT = "CONFLICT"
 
 _FUZZY_THRESHOLD = 0.85
 
-
 def email_key(value) -> str | None:
     return normalize_email(value) or None
-
 
 def _email_of(record: dict) -> str | None:
     return email_key(record.get("email_primary") or record.get("email"))
 
-
 def _phone_of(record: dict) -> str | None:
     return phone_key(record.get("phone_primary") or record.get("whatsapp"))
-
 
 def _company_of(record: dict) -> str | None:
     return company_key(record.get("company_name") or record.get("company"))
 
-
 def _phone_overlap(a: str, b: str) -> bool:
     return a == b or (len(a) >= 10 and len(b) >= 10 and (a in b or b in a))
-
 
 def _similarity(a: str, b: str) -> float:
     if a == b:
@@ -51,11 +45,9 @@ def _similarity(a: str, b: str) -> float:
                if tokens_a and tokens_b else 0.0)
     return max(seq, jaccard)
 
-
 def _result(band: str, score: float, matched_on: str, reasons: list[str]) -> dict:
     return {"band": band, "score": round(score, 2),
             "matched_on": matched_on, "reasons": reasons}
-
 
 def compare(a: dict, b: dict) -> dict:
     """Report the match band between two contact-like records.
@@ -125,7 +117,6 @@ def compare(a: dict, b: dict) -> dict:
                        ["fuzzy name similarity — human review only"])
 
     return _result(UNIQUE, 0.0, "", ["no identity match"])
-
 
 def find_matches(candidate: dict, records: list[dict]) -> list[dict]:
     """Report every non-UNIQUE comparison of candidate against records,

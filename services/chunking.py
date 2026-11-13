@@ -3,13 +3,9 @@
 # file rows) and merges validated chunk results back together. Identity
 # evidence decides merges; uncertain identities are preserved, never merged.
 import json
-import re
 
 from services.keys import identity_key
-from services.prompts.contact_extraction import (
-    EXTRACTION_CONTRACT, MAX_CONTENT_CHARS, MAX_HEADER_CHARS,
-    MAX_HEADER_KEY_CHARS, _sanitize_header,
-)
+from services.prompts.contact_extraction import EXTRACTION_CONTRACT, MAX_CONTENT_CHARS, MAX_HEADER_CHARS, MAX_HEADER_KEY_CHARS, _sanitize_header
 
 _PREAMBLE = """<EXTRACTION REQUEST>
 schema_version: crm-extraction.v1
@@ -25,7 +21,6 @@ This is chunk {chunk_no} of {total_chunks}. Rows cited with absolute file row nu
 {header_block}"""
 _END = "--- END UNTRUSTED SOURCE CONTENT ---"
 
-
 def _row_line(i: int, row: dict) -> str:
     cells = ", ".join(
         f"{_sanitize_header(k, MAX_HEADER_KEY_CHARS)}="
@@ -33,7 +28,6 @@ def _row_line(i: int, row: dict) -> str:
         for k, v in (row.items() if isinstance(row, dict) else [])
         if not str(k).startswith("_") and str(v or "").strip())
     return f"row {i}: {cells}"
-
 
 def build_doc_chunks(table: dict, *, source_type: str = "spreadsheet",
                      layer1: dict | None = None,
@@ -71,7 +65,6 @@ def build_doc_chunks(table: dict, *, source_type: str = "spreadsheet",
         + _END
         for n, chunk in enumerate(chunks)
     ]
-
 
 def merge_extraction(results: list[dict]) -> dict:
     """Merge validated crm-extraction.v1 payloads (one per chunk).

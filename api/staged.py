@@ -1,20 +1,16 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
-import json
+from fastapi import APIRouter, HTTPException, Query
+
 import logging
 import math
 from datetime import datetime
 import db
-from services.keys import (
-    normalize_email, phone_key, normalize_name, record_keys,
-)
+from services.keys import normalize_email, phone_key, normalize_name, record_keys
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
 
 # ── Schemas ──────────────────────────────────────────────────────────────
 
@@ -37,15 +33,11 @@ class StagedContactIn(BaseModel):
     cc_emails: Optional[str] = None
     bcc_emails: Optional[str] = None
 
-
 class BulkApproveRejectIn(BaseModel):
     staged_ids: List[int]
     action: str  # "approve" or "reject"
 
-
 # ── DB helper ─────────────────────────────────────────────────────────────
-
-
 
 def _exec(con, sql, params=()):
     """Execute SQL with error handling."""
@@ -56,7 +48,6 @@ def _exec(con, sql, params=()):
     except Exception as e:
         con.rollback()
         raise e
-
 
 def _require_staged_table(con):
     """Live DB is at migration v1 by standing user decision (2026-11-07 board note —
@@ -71,7 +62,6 @@ def _require_staged_table(con):
             "by the gated migration train (CRM_APPLY_MIGRATIONS=1), which is pending "
             "explicit approval. See docs/INTERFACE_CONTRACTS.md / DECISIONS.md D-030.",
         )
-
 
 # ── Routes ───────────────────────────────────────────────────────────────
 
@@ -130,7 +120,6 @@ async def list_staged_contacts(
     finally:
         con.close()
 
-
 @router.get("/staged-contacts/{staged_id}")
 async def get_staged_contact(staged_id: int):
     """Get a single staged contact by ID."""
@@ -144,7 +133,6 @@ async def get_staged_contact(staged_id: int):
     finally:
         con.close()
 
-
 # ── Approval core (shared by per-id, bulk and bulk-action endpoints) ────────
 
 _CONTACT_FIELD_MAP = {
@@ -156,12 +144,10 @@ _CONTACT_FIELD_MAP = {
     "position": "position",
 }
 
-
 def _canon_keys(sc) -> dict:
     """Dedup keys for a new canonical contact, always from the authoritative
     normalizers — identical to what staged rows were written with."""
     return record_keys(dict(sc))
-
 
 def _enrich_existing(con, existing_id: int, sc) -> None:
     """Local-wins merge: only fill fields that are empty in the canonical row."""
@@ -173,7 +159,6 @@ def _enrich_existing(con, existing_id: int, sc) -> None:
             f"SELECT {canon_col} FROM contacts WHERE id = ?", (existing_id,)).fetchone()[0]
         if existing_val == "" or existing_val is None:
             con.execute(f"UPDATE contacts SET {canon_col} = ? WHERE id = ?", (val, existing_id))
-
 
 def _insert_contact(con, sc) -> int:
     keys = _canon_keys(sc)
@@ -200,7 +185,6 @@ def _insert_contact(con, sc) -> int:
         ),
     )
     return int(cur.lastrowid)
-
 
 def _approve_ids(con, staged_ids: List[int]) -> dict:
     """Approve staged rows into canonical contacts. Returns per-row outcomes."""
@@ -241,7 +225,6 @@ def _approve_ids(con, staged_ids: List[int]) -> dict:
         approved += 1
     return {"approved": approved, "already_approved": already, "failed": failed}
 
-
 def _approve_ids_logged(staged_ids: List[int]) -> dict:
     con = db.connect()
     try:
@@ -259,7 +242,6 @@ def _approve_ids_logged(staged_ids: List[int]) -> dict:
     finally:
         con.close()
 
-
 @router.post("/staged-contacts/approve")
 async def approve_staged_contact(
     body: BulkApproveRejectIn,
@@ -269,7 +251,6 @@ async def approve_staged_contact(
         raise HTTPException(422, "action must be 'approve'")
     outcome = _approve_ids_logged(body.staged_ids)
     return {"ok": True, **outcome}
-
 
 @router.post("/staged-contacts/bulk-action")
 async def bulk_staged_action(
@@ -304,7 +285,6 @@ async def bulk_staged_action(
             con.close()
     raise HTTPException(422, "action must be 'approve', 'reject' or 'dismiss'")
 
-
 @router.post("/staged-contacts/{staged_id}/approve")
 async def approve_one_staged_contact(staged_id: int):
     """Single-id approve used by the review UI (same core as the bulk endpoint)."""
@@ -312,7 +292,6 @@ async def approve_one_staged_contact(staged_id: int):
     if outcome["approved"] == 0 and outcome["already_approved"] == 0:
         raise HTTPException(404, "staged contact not found")
     return {"ok": True, **outcome}
-
 
 def _decide_one(con, staged_id: int, review_status: str, import_status: str) -> bool:
     """Apply a terminal review decision; returns False when the row is missing."""
@@ -331,7 +310,6 @@ def _decide_one(con, staged_id: int, review_status: str, import_status: str) -> 
     else:
         raise AssertionError(f"unhandled decision {review_status}")
     return cur.rowcount > 0
-
 
 @router.post("/staged-contacts/{staged_id}/reject")
 async def reject_staged_contact(
@@ -353,7 +331,6 @@ async def reject_staged_contact(
     finally:
         con.close()
 
-
 @router.post("/staged-contacts/{staged_id}/dismiss")
 async def dismiss_staged_contact(
     staged_id: int,
@@ -374,17 +351,14 @@ async def dismiss_staged_contact(
     finally:
         con.close()
 
-
 _STAGED_EDITABLE = {
     "name", "email", "phone_primary", "phone_secondary", "company",
     "designation", "address", "city", "pincode", "website", "whatsapp",
     "position", "files", "email_secondary", "to_emails", "cc_emails", "bcc_emails",
 }
 
-
 class StagedFieldsIn(BaseModel):
     fields: Dict[str, Any]
-
 
 def _apply_field_edits(con, staged_id: int, fields: dict) -> bool:
     unknown = sorted(set(fields) - _STAGED_EDITABLE)
@@ -400,7 +374,6 @@ def _apply_field_edits(con, staged_id: int, fields: dict) -> bool:
     cur = con.execute(
         f"UPDATE staged_contacts SET {set_clause}, updated_at = datetime('now') WHERE id = ?", vals)
     return cur.rowcount > 0
-
 
 @router.patch("/staged-contacts/{staged_id}")
 async def patch_staged_contact(
@@ -427,7 +400,6 @@ async def patch_staged_contact(
         con.close()
         logger.exception("PATCH staged-contacts/%s failed", staged_id)
         raise HTTPException(500, "could not update staged contact")
-
 
 @router.post("/staged-contacts/{staged_id}/edit")
 async def edit_staged_contact(
@@ -523,7 +495,6 @@ async def check_staged_dedup(
         }
     finally:
         con.close()
-
 
 @router.post("/staged-contacts/{staged_id}/merge")
 async def merge_staged_contact(

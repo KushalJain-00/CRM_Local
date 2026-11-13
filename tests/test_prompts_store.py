@@ -25,7 +25,7 @@ def test_default_eml_prompt_is_self_contained_and_contract_shaped():
     for field in ("name", "email", "phone_primary", "phone_secondary", "company",
                   "designation", "address", "city", "pincode", "website"):
         assert field in text
-    # llm.SYSTEM_PROMPT delegates to the store default (single source of truth)
+    # llm's default EML prompt delegates to the store default (single source of truth)
     assert llm._default_eml_prompt() == text
 
 

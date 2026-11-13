@@ -1,10 +1,8 @@
 # services/adapters/csv.py — CSV extraction adapter
 """CSV → normalized contacts via the shared table mapper (parse.py)."""
-import os
 
 from . import ExtractionResult
 from ._table import contacts_from_table
-
 
 class CsvAdapter:
     name = "csv"

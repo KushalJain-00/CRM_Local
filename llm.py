@@ -13,8 +13,6 @@ import httpx
 import providers
 from providers import ProviderError
 
-PROVIDERS = list(providers.PROVIDERS)  # /api/status compat: provider id list
-
 SUBSCRIPTION_NOTE = (
     "An API key is required for cloud providers — a ChatGPT/Claude/Gemini "
     "app subscription alone does not include API access. Ollama and custom "
@@ -34,13 +32,12 @@ def _default_eml_prompt() -> str:
                 '"pincode":null,"website":null}')
 
 
-RETRY_BACKOFF = [1, 2]  # default per-entry sleeps (attempts = len + 1); kept for compat
+RETRY_BACKOFF = [1, 2]  # default per-entry sleeps; feeds default_reliability()
 
 TIMEOUT = 120.0  # default request timeout (local app: no proxy to race)
 
-# Single source of truth lives in services/prompts/store.py; the fallback is
-# imported lazily to avoid a hard import cycle (store imports config).
-SYSTEM_PROMPT = None  # resolved to services.prompts.store.DEFAULT_EML_PROMPT in extract()
+# Single source of truth for the default EML system prompt lives in
+# services/prompts/store.py (imported lazily to avoid a hard import cycle).
 
 # Part 7: non-secret per-run diagnostics, one record per attempted entry.
 LAST_RUN: list[dict] = []
@@ -323,15 +320,6 @@ async def extract(chain: list, prompt: str, *, system: str | None = None,
         _breaker_record(entry, rel, failed=True)
         failures.append(reason)
     return None, "; ".join(failures) or "unspecified extraction failure"
-
-
-def describe_failure(kind: str, chain: list, reliability: dict | None = None) -> str:
-    """Part 6 @F: aggregate, human-readable failure report (no keys)."""
-    tries = [r for r in LAST_RUN]
-    line = f"all {len(tries)} provider entries failed for {kind} extraction"
-    for r in tries:
-        line += f"; {r['provider']}: {r['reason']}"
-    return line
 
 
 async def test_entry(entry: dict) -> str:

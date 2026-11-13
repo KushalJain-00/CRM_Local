@@ -1,12 +1,8 @@
 # tests/test_keys.py — the one identity-key implementation, pinned hard.
 import pytest
 
-from services.keys import (
-    normalize_email, normalize_phone, phone_key, name_key, company_key,
-    website_key, normalize_name, record_keys, identity_key, is_duplicate,
-)
+from services.keys import normalize_email, normalize_phone, phone_key, name_key, company_key, website_key, normalize_name, record_keys, identity_key, is_duplicate
 from services import dedup, staging
-
 
 class TestEmail:
     def test_trim_and_case(self):
@@ -15,7 +11,6 @@ class TestEmail:
     def test_empty_and_none(self):
         assert normalize_email(None) == ""
         assert normalize_email("") == ""
-
 
 class TestPhone:
     @pytest.mark.parametrize("raw,key", [
@@ -34,7 +29,6 @@ class TestPhone:
 
     def test_normalize_phone_keeps_all_digits(self):
         assert normalize_phone("+91 (22) 1234-5678") == "912212345678"
-
 
 class TestNameKey:
     @pytest.mark.parametrize("raw", [
@@ -60,7 +54,6 @@ class TestNameKey:
         # is_duplicate's comparison form is not honorific-stripped
         assert normalize_name("Mr. Ravi Kumar") == "mr. ravi kumar"
 
-
 class TestCompanyAndWebsite:
     def test_legal_tokens_removed_case_insensitive(self):
         assert company_key("Acme Pvt Ltd") == "acme"
@@ -75,7 +68,6 @@ class TestCompanyAndWebsite:
         assert website_key("https://www.Acme.in/products?q=1") == "acme.in"
         assert website_key("acme.in:8080/about") == "acme.in"
         assert website_key("") is None
-
 
 class TestRecordKeys:
     def test_complete_keys_from_contact_dict(self):
@@ -105,7 +97,6 @@ class TestRecordKeys:
         assert keys["email_key"] == "a@b.in"
         assert keys["company_key"] == "acme"
 
-
 class TestPriority:
     def test_email_wins_over_phone(self):
         k = identity_key({"email_primary": "a@b.in", "phone_primary": "9876543210"})
@@ -128,7 +119,6 @@ class TestPriority:
         eml = {"name": "Mr. Ravi Kumar", "email": "RAVI@x.in", "company": "Acme Ltd"}
         csv = {"name": "Ravi Kumar", "email_primary": "ravi@x.in", "company": "Acme Pvt Ltd"}
         assert identity_key(eml) == identity_key(csv)
-
 
 class TestWriterConsistency:
     def test_staged_and_canonical_keys_agree(self, data_dir):
@@ -172,7 +162,6 @@ class TestWriterConsistency:
             assert candidates
         finally:
             con.close()
-
 
 class TestIsDuplicate:
     def test_email_hit(self):

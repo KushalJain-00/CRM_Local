@@ -1,16 +1,13 @@
 import asyncio
-import json
 
 from services.chunking import build_doc_chunks, merge_extraction
 from services import ai_assist
-
 
 def _table(n_rows):
     rows = [{"Name": f"Person {i}", "Email": f"p{i}@example.com", "Phone": f"9000000{i:03d}",
              "_row": i + 2, "_sheet": "Sheet1"}
             for i in range(n_rows)]
     return {"sheet": "Sheet1", "headers": ["Name", "Email", "Phone"], "rows": rows}
-
 
 def test_chunks_cover_every_row_exactly_once():
     table = _table(120)
@@ -23,7 +20,6 @@ def test_chunks_cover_every_row_exactly_once():
                 seen.append(int(line.split(":", 1)[0].split()[1]))
     assert sorted(seen) == list(range(2, 122))
 
-
 def test_chunks_carry_absolute_row_numbers_and_markers():
     table = _table(3)
     chunks = build_doc_chunks(table)
@@ -31,7 +27,6 @@ def test_chunks_carry_absolute_row_numbers_and_markers():
     assert "row 2:" in chunks[0]
     assert "UNTRUSTED SOURCE CONTENT" in chunks[0]
     assert "_row" not in chunks[0]  # internal provenance keys are not leaked
-
 
 def test_merge_dedups_by_email_and_records_conflict():
     a = {"contacts": [{"name": "Asha Rao", "email_primary": "a@x.com",
@@ -45,12 +40,10 @@ def test_merge_dedups_by_email_and_records_conflict():
     assert c["company_name"] == "Acme"      # gap filled from chunk 2
     assert any("name" in w["message"] for w in merged["warnings"])
 
-
 def test_merge_keeps_unidentifiable_contacts():
     a = {"contacts": [{"name": None, "phone_primary": None}, {"name": None}]}
     merged = merge_extraction([a])
     assert len(merged["contacts"]) == 2
-
 
 def test_ai_assist_merges_chunks_and_validates(monkeypatch):
     table = _table(2)
@@ -93,7 +86,6 @@ def test_ai_assist_merges_chunks_and_validates(monkeypatch):
     assert notes == []
     emails = {c["email_primary"] for c in out}
     assert emails == {"asha@example.com", "bob@example.com"}
-
 
 def test_ai_assist_returns_empty_on_total_failure(monkeypatch):
     async def fake_extract(chain, prompt, **kwargs):

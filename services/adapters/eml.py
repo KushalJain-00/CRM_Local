@@ -3,8 +3,7 @@
 the pipeline runs the contract-validated AI stage and the email-row link."""
 import os
 
-from . import NormalizedContact, ExtractionResult, eml_to_normalized
-
+from . import ExtractionResult, eml_to_normalized
 
 class EmlAdapter:
     name = "eml"

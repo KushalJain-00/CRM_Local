@@ -1,13 +1,11 @@
 # services/ai_assist.py — LLM assist for documents, shared by intake and the
 # folder-scan pipeline. Deterministic Layer-1 results are never discarded;
 # AI fills gaps. Failures degrade to Layer-1, never to fabricated output.
-import json
 
 import llm
 from services.chunking import build_doc_chunks, merge_extraction
 from services.contract import validate_extraction_result
 from services.prompts import store as prompt_store
-
 
 def ai_contacts_to_staged(c: dict) -> dict:
     phone2 = c.get("phone_secondary")
@@ -28,7 +26,6 @@ def ai_contacts_to_staged(c: dict) -> dict:
         "confidence": {"high": 0.9, "medium": 0.6, "low": 0.3}.get(
             str(c.get("confidence") or "low").lower(), 0.3),
     }
-
 
 async def assist_document(table: dict, *, name: str, chain: list, cfg: dict,
                           source_type: str = "spreadsheet",

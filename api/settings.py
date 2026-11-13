@@ -1,7 +1,6 @@
 # api/settings.py — settings + providers (INTERFACE_CONTRACTS §2.1)
-import os
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+
+from typing import Any, Optional
 import uuid
 
 from fastapi import APIRouter, HTTPException
@@ -16,7 +15,6 @@ RELIABILITY_DESCRIPTIONS = llm.RELIABILITY_DESCRIPTIONS
 
 router = APIRouter()
 
-
 class ProviderIn(BaseModel):
     id: Optional[str] = None
     provider: Optional[str] = None
@@ -25,14 +23,11 @@ class ProviderIn(BaseModel):
     base_url: str = ""
     enabled: bool = True
 
-
 class ModeIn(BaseModel):
     mode: str
     import_policy: str = "review_first"
 
-
 MASKED_KEY = "********"
-
 
 def _mask_chain(chain: list | None) -> list:
     masked = []
@@ -49,12 +44,10 @@ def _mask_chain(chain: list | None) -> list:
         masked.append(e)
     return masked
 
-
 def _mask_cfg(cfg: dict) -> dict:
     out = dict(cfg)
     out["chain"] = _mask_chain(out.get("chain"))
     return out
-
 
 @router.get("/settings")
 async def get_settings():
@@ -64,7 +57,6 @@ async def get_settings():
     cfg["crm_db_path"] = str(config.db_path("crm"))
     cfg["eml_db_path"] = str(config.db_path("eml"))
     return cfg
-
 
 @router.post("/settings")
 async def update_settings(body: dict):
@@ -107,14 +99,12 @@ async def update_settings(body: dict):
     config.save(cfg)
     return _mask_cfg(cfg)
 
-
 @router.get("/providers")
 async def list_providers():
     import config
     cfg = config.load()
     providers = cfg.get("chain", [])
     return _mask_chain(providers)
-
 
 @router.post("/providers")
 async def add_provider(body: ProviderIn):
@@ -137,7 +127,6 @@ async def add_provider(body: ProviderIn):
     config.save(cfg)
     return _mask_chain(chain)
 
-
 @router.patch("/providers/{provider_id}")
 async def edit_provider(provider_id: str, body: ProviderIn):
     import config
@@ -155,7 +144,6 @@ async def edit_provider(provider_id: str, body: ProviderIn):
     config.save(cfg)
     return _mask_chain(chain)
 
-
 @router.delete("/providers/{provider_id}")
 async def remove_provider(provider_id: str):
     import config
@@ -167,7 +155,6 @@ async def remove_provider(provider_id: str):
     cfg["chain"] = new_chain
     config.save(cfg)
     return {"ok": True}
-
 
 @router.post("/providers/{provider_id}/enable")
 async def enable_provider(provider_id: str):
@@ -184,7 +171,6 @@ async def enable_provider(provider_id: str):
     config.save(cfg)
     return _mask_chain(chain)
 
-
 @router.post("/providers/{provider_id}/disable")
 async def disable_provider(provider_id: str):
     import config
@@ -200,13 +186,11 @@ async def disable_provider(provider_id: str):
     config.save(cfg)
     return _mask_chain(chain)
 
-
 @router.get("/settings/mode")
 async def get_mode():
     import config
     cfg = config.load()
     return {"mode": cfg.get("mode", "review_first"), "import_policy": cfg.get("import_policy", "review_first")}
-
 
 @router.put("/settings/mode")
 async def set_mode(body: ModeIn):
@@ -216,7 +200,6 @@ async def set_mode(body: ModeIn):
     cfg["import_policy"] = body.import_policy
     config.save(cfg)
     return {"ok": True, "mode": body.mode, "import_policy": body.import_policy}
-
 
 # ── Provider catalog, model discovery & connection testing ──────────────────
 
@@ -231,7 +214,6 @@ def _clamp_reliability(raw: Any) -> dict:
         except (TypeError, ValueError):
             raise HTTPException(422, f"reliability.{key} must be a number")
     return out
-
 
 def _resolve_entry(body: dict) -> tuple[dict, bool]:
     """Build a chain entry for test/discovery; resolve stored key when masked.
@@ -257,7 +239,6 @@ def _resolve_entry(body: dict) -> tuple[dict, bool]:
             e["base_url"] = stored.get("base_url") or ""
     return e, bool(stored)
 
-
 @router.get("/providers/catalog")
 async def get_catalog():
     import providers as prov
@@ -278,7 +259,6 @@ async def get_catalog():
         "subscription_note": llm.SUBSCRIPTION_NOTE,
     }
 
-
 @router.post("/providers/models")
 async def discover_models(body: dict):
     import providers
@@ -291,7 +271,6 @@ async def discover_models(body: dict):
         out["error"] = err
     return out
 
-
 @router.post("/providers/test")
 async def test_provider(body: dict):
     entry, _ = _resolve_entry(body)
@@ -300,13 +279,11 @@ async def test_provider(body: dict):
     return {"ok": ok, "message": "connected successfully" if ok else result,
             "provider": entry.get("provider") or "", "model": entry.get("model") or ""}
 
-
 @router.get("/reliability")
 async def get_reliability():
     stored = config.load().get("reliability") or {}
     return {"reliability": {**llm.default_reliability(), **stored},
             "descriptions": RELIABILITY_DESCRIPTIONS}
-
 
 @router.put("/reliability")
 async def set_reliability(body: dict):
@@ -316,11 +293,9 @@ async def set_reliability(body: dict):
     config.save(cfg)
     return {"ok": True, "reliability": rel}
 
-
 def _utcnow() -> str:
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
 
 # ── Editable extraction prompt store (Part 4) ────────────────────────────────
 
@@ -340,7 +315,6 @@ async def list_prompts():
         }
     return out
 
-
 @router.get("/prompts/{kind}")
 async def get_prompt(kind: str):
     import services.prompts.store as store
@@ -358,7 +332,6 @@ async def get_prompt(kind: str):
         "chars": len(store.text(kind)),
     }
 
-
 @router.put("/prompts/{kind}")
 async def save_prompt(kind: str, body: dict):
     import services.prompts.store as store
@@ -371,7 +344,6 @@ async def save_prompt(kind: str, body: dict):
     version, custom, updated = store.load(kind)
     return {"ok": True, "kind": kind, "updated_at": updated,
             "default_version": version, "chars": len(custom or "")}
-
 
 @router.post("/prompts/{kind}/reset")
 async def reset_prompt(kind: str):

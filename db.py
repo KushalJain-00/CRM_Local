@@ -1,7 +1,7 @@
 # db.py — Unified SQLite store for CRM_Local (single database, all tables).
 import hashlib
 import json
-import re
+
 import sqlite3
 import os
 import shutil
@@ -10,26 +10,22 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import config
-from services.keys import (
-    name_key, company_key, website_key, phone_key, normalize_email,
-)
+from services.keys import name_key, company_key, website_key, phone_key, normalize_email
 
 # Unified database: single file for all CRM + EML data (D-014)
 _UNIFIED_DB = "crm.db"
 
-
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-
 def connect(which: str = "crm") -> sqlite3.Connection:
-    """Connect to the unified database. 'which' param kept for backward compat."""
+    """Connect to the unified database. "which" is accepted for call-site
+    compatibility and ignored (single SQLite file, D-014)."""
     con = sqlite3.connect(config.db_path("crm"), timeout=30)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA foreign_keys=ON")
     return con
-
 
 def init() -> None:
     """Initialize all tables in the unified database."""
@@ -59,7 +55,6 @@ def init() -> None:
     run_migrations(con)
     con.commit()
     con.close()
-
 
 _SCHEMA_UNIFIED = """
 -- CRM tables
@@ -175,7 +170,6 @@ CREATE TABLE IF NOT EXISTS _migration_log (
 );
 """
 
-
 def _migrate(con: sqlite3.Connection) -> None:
     """Run idempotent migrations and data migration from old eml.db."""
     # Migration 1: ensure all columns exist (for existing crm.db)
@@ -206,7 +200,6 @@ def _migrate(con: sqlite3.Connection) -> None:
     except Exception:
         pass
 
-
 def _ensure_columns(con: sqlite3.Connection, table: str, columns: list[tuple[str, str]]) -> None:
     """Add columns to a table if they don't exist (idempotent)."""
     try:
@@ -219,7 +212,6 @@ def _ensure_columns(con: sqlite3.Connection, table: str, columns: list[tuple[str
                 con.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
             except Exception:
                 pass
-
 
 def _migrate_eml_data(con: sqlite3.Connection) -> None:
     """Migrate data from old eml.db into the unified DB (idempotent)."""
@@ -294,7 +286,6 @@ def _migrate_eml_data(con: sqlite3.Connection) -> None:
     except Exception as e:
         pass  # Migration is best-effort; original DBs are preserved
 
-
 # ─── Staged-contact migration train (D-030, Phase 1) ─────────────────────────
 # v2 receiver cols (D-022) · v3 staging + relationship/audit tables + CHECK
 # enums · v4 backfill 47 eml_contacts rows into staged_contacts · v5 links +
@@ -306,10 +297,8 @@ def _migrate_eml_data(con: sqlite3.Connection) -> None:
 CURRENT_MIGRATION_VERSION = 10
 _MIGRATION_GATE_ENV = "CRM_APPLY_MIGRATIONS"   # set to "1" to apply on the live DB
 
-
 class MigrationError(RuntimeError):
     """A migration failed and was rolled back; or a post-train check failed."""
-
 
 def _live_db_file() -> str:
     """Canonical production DB path (D-030 gate anchor). Delegates to
@@ -317,11 +306,9 @@ def _live_db_file() -> str:
     config.data_dir(), which tests legitimately monkeypatch."""
     return os.path.realpath(str(config.canonical_db_path()))
 
-
 def _con_db_file(con: sqlite3.Connection) -> str:
     row = con.execute("PRAGMA database_list").fetchone()
     return os.path.realpath(row[2]) if row and row[2] else ""
-
 
 # Identity keys live in services/keys.py — single implementation.
 
@@ -436,7 +423,6 @@ _CONTACT_INDEXES = [
     ("website_key", "CREATE INDEX IF NOT EXISTS idx_contacts_website_key ON contacts(website_key)"),
 ]
 
-
 def _mig_v2_receiver_cols(con: sqlite3.Connection) -> None:
     """v2 (D-022, §4.2 A): receiver_name/receiver_email columns + backfill."""
     for ddl in ("ALTER TABLE eml_emails ADD COLUMN receiver_name TEXT",
@@ -461,7 +447,6 @@ def _mig_v2_receiver_cols(con: sqlite3.Connection) -> None:
                OR TRIM(COALESCE(bcc_emails,'')) <> '')
     """)
 
-
 def _mig_v3_staging_tables(con: sqlite3.Connection) -> None:
     """v3 (§4.3): staged_contacts + relationship/audit tables + CHECK enums +
     status/keyset/dedup indexes; companies.website_key (§4.2 B)."""
@@ -471,7 +456,6 @@ def _mig_v3_staging_tables(con: sqlite3.Connection) -> None:
     if "website_key" not in cols:
         con.execute("ALTER TABLE companies ADD COLUMN website_key TEXT")
     con.execute("CREATE INDEX IF NOT EXISTS idx_companies_website_key ON companies(website_key)")
-
 
 def _mig_v4_backfill_staged(con: sqlite3.Connection) -> None:
     """v4: copy every eml_contacts row into staged_contacts (source_type='eml'),
@@ -531,7 +515,6 @@ def _mig_v4_backfill_staged(con: sqlite3.Connection) -> None:
     if n != len(rows):
         raise MigrationError(f"v4: staged {n} rows != eml_contacts {len(rows)}")
 
-
 def _mig_v5_backfill_links_status(con: sqlite3.Connection) -> None:
     """v5: email_staged_links (source_email_id, EXISTS-guarded) + D-015 phantom
     rows get an explicit validation warning; import_status stays NOT_IMPORTED —
@@ -562,7 +545,6 @@ def _mig_v5_backfill_links_status(con: sqlite3.Connection) -> None:
     """).fetchone()[0]
     if left:
         raise MigrationError(f"v5: {left} phantom rows missing D-015 warning/status")
-
 
 def _mig_v6_rebuild_contacts(con: sqlite3.Connection) -> None:
     """v6 (D-016): SQLite table rebuild of `contacts`. ALTER cannot add the
@@ -641,7 +623,6 @@ def _mig_v6_rebuild_contacts(con: sqlite3.Connection) -> None:
         if col in cols_now:
             con.execute(sql)
 
-
 def _mig_v9_verify_and_log(con: sqlite3.Connection) -> None:
     """v9 (§5): structural verification of the train; the runner additionally
     runs PRAGMA integrity_check + foreign_key_check after the last migration."""
@@ -672,7 +653,6 @@ def _mig_v9_verify_and_log(con: sqlite3.Connection) -> None:
     if con.execute("SELECT COUNT(*) FROM sqlite_master WHERE name GLOB 'contacts_fts*'").fetchone()[0]:
         raise MigrationError("v9: FTS5 objects present but v8 is deferred to Phase 5")
 
-
 def _mig_v10_drop_records(con: sqlite3.Connection) -> None:
     """v10 (D-017): drop `records` ONLY if it exists and is empty. Repo-wide
     grep shows zero readers/writers; if ever non-empty, it is left in place."""
@@ -682,7 +662,6 @@ def _mig_v10_drop_records(con: sqlite3.Connection) -> None:
         return  # already dropped / never created (fresh base schema)
     if n == 0:
         con.execute("DROP TABLE records")
-
 
 class _Migration:
     def __init__(self, version: int, name: str, fn, rollback_sql: str | None = None,
@@ -700,14 +679,11 @@ class _Migration:
         payload = f"v{self.version}:{self.name}:{self.rollback_sql or ''}".encode()
         return hashlib.sha256(payload).hexdigest()
 
-
 _MIGRATIONS: dict[int, _Migration] = {}
-
 
 def _register(m: _Migration) -> _Migration:
     _MIGRATIONS[m.version] = m
     return m
-
 
 _register(_Migration(2, "eml_emails_receiver_cols", _mig_v2_receiver_cols,
     rollback_sql="ALTER TABLE eml_emails DROP COLUMN receiver_name; "
@@ -728,7 +704,6 @@ _register(_Migration(6, "rebuild_contacts_fk_keys", _mig_v6_rebuild_contacts,
 _register(_Migration(9, "verify_and_log", _mig_v9_verify_and_log, rollback_sql=None))
 _register(_Migration(10, "drop_records_if_empty", _mig_v10_drop_records,
     rollback_sql="-- table was empty when dropped; recreate from the legacy DDL if ever needed"))
-
 
 def run_migrations(con: sqlite3.Connection, target: int = CURRENT_MIGRATION_VERSION,
                    force: bool = False) -> list[int]:
@@ -814,7 +789,6 @@ def run_migrations(con: sqlite3.Connection, target: int = CURRENT_MIGRATION_VERS
         con.isolation_level = old_iso
     return applied_now
 
-
 def backup_database(dest, src=None) -> str:
     """Consistent hot backup via sqlite3's backup API (WAL-safe) — D-030 step 0.
     Verifies the copy with PRAGMA integrity_check; returns the dest path."""
@@ -839,7 +813,6 @@ def backup_database(dest, src=None) -> str:
         chk.close()
     return dest_path
 
-
 def restore_database(backup, dest=None) -> str:
     """Atomically replace dest with the backup (WAL/SHM sidecars removed first).
     Run while the app is stopped: connections opened earlier keep the old file."""
@@ -863,105 +836,6 @@ def restore_database(backup, dest=None) -> str:
     os.replace(tmp_path, dest_path)
     return dest_path
 
-
-class DedupIndex:
-    def __init__(self):
-        self.emails: set[str] = set()
-        self.phones: set[str] = set()
-        self.names: set[str] = set()
-
-    @classmethod
-    def load(cls, con: sqlite3.Connection, table: str, with_names: bool = False) -> "DedupIndex":
-        idx = cls()
-        try:
-            rows = con.execute(f"SELECT email_primary, phone_primary, name FROM {table}").fetchall()
-        except Exception:
-            try:
-                rows = con.execute(f"SELECT email, phone_primary, name FROM {table}").fetchall()
-            except Exception:
-                return idx
-        for r in rows:
-            idx.add(r["email_primary"] if "email_primary" in r.keys() else r["email"],
-                    r["phone_primary"], r["name"] if with_names else None)
-        return idx
-
-    def add(self, email, phone, name=None):
-        if email:
-            self.emails.add(normalize_email(email))
-        pk = phone_key(phone)
-        if pk:
-            self.phones.add(pk)
-        if name:
-            self.names.add(" ".join((name or "").split()).lower())
-
-    def duplicate_reason(self, email, phone, name=None):
-        e = normalize_email(email)
-        if e and e in self.emails:
-            return "email"
-        pk = phone_key(phone)
-        if pk and len(pk) >= 10:
-            for ep in self.phones:
-                if ep == pk or (len(ep) >= 10 and (ep in pk or pk in ep)):
-                    return "phone"
-        if name:
-            n = " ".join((name or "").split()).lower()
-            if n and len(n) >= 3 and n in self.names:
-                return "name"
-        return None
-
-
-def _find(con, table, email, phone, name=None):
-    # Find existing contact by email, phone, or name+phone
-    if email:
-        r = con.execute(f"SELECT * FROM {table} WHERE email_primary = ?", (email,)).fetchone()
-        if r:
-            return dict(r)
-    if phone:
-        pk = phone_key(phone)
-        r = con.execute(f"SELECT * FROM {table} WHERE phone_primary = ?", (phone,)).fetchone()
-        if r:
-            return dict(r)
-    if name and phone:
-        r = con.execute(f"SELECT * FROM {table} WHERE name = ? AND phone_primary = ?", (name, phone)).fetchone()
-        if r:
-            return dict(r)
-    return None
-
-
-def upsert_contact(con, fields, table="contacts", source_file=None):
-    """Merge-or-create a contact. Returns (id, 'new'|'merged'|'skipped')."""
-    email = (fields.get("email_primary") or fields.get("email") or "").strip().lower()
-    phone = (fields.get("phone_primary") or fields.get("phone") or "").strip()
-    name = (fields.get("name") or "").strip()
-
-    existing = _find(con, table, email, phone, name)
-    if existing:
-        # Enrich empty fields only
-        merged = False
-        for key in ["name", "email_primary", "phone_primary", "company", "designation",
-                    "address", "city", "pincode", "website", "email_secondary", "phone_secondary"]:
-            val = fields.get(key)
-            if val and not existing.get(key):
-                con.execute(f"UPDATE {table} SET {key} = ? WHERE id = ?", (val, existing["id"]))
-                merged = True
-        # Update dedup keys
-        if email:
-            con.execute(f"UPDATE {table} SET email_key = ? WHERE id = ?", (email, existing["id"]))
-        if phone:
-            con.execute(f"UPDATE {table} SET phone_key = ? WHERE id = ?", (phone_key(phone), existing["id"]))
-        if source_file:
-            con.execute(f"UPDATE {table} SET source_file = ? WHERE id = ? AND source_file IS NULL", (source_file, existing["id"]))
-        return existing["id"], ("merged" if merged else "skipped")
-    else:
-        cols = "name, email_primary, email_secondary, phone_primary, phone_secondary, company, designation, address, city, pincode, website, email_key, phone_key, source_file, created_at, updated_at"
-        vals = (name or None, email or None, fields.get("email_secondary"), phone or None,
-                fields.get("phone_secondary"), fields.get("company"), fields.get("designation"),
-                fields.get("address"), fields.get("city"), fields.get("pincode"), fields.get("website"),
-                email or None, phone_key(phone), source_file, now_iso(), now_iso())
-        cur = con.execute(f"INSERT INTO {table} ({cols}) VALUES ({','.join('?'*16)})", vals)
-        return cur.lastrowid, "new"
-
-
 def insert_email(con, parsed, file_path):
     cur = con.execute("""
         INSERT INTO eml_emails (file_name, file_path, subject, date, sender_name, sender_email,
@@ -980,68 +854,11 @@ def insert_email(con, parsed, file_path):
     ))
     return cur.lastrowid
 
-
-def insert_eml_contact(con, email_id, fields, status="NEW", source_file=""):
-    cur = con.execute("""
-        INSERT INTO eml_contacts (source_email_id, name, email, phone_primary, phone_secondary,
-            company, designation, address, city, pincode, website, dedup_status, pushed_to_crm,
-            source_file, email_key, phone_key, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
-    """, (
-        email_id, fields.get("name"), fields.get("email_primary") or fields.get("email"),
-        fields.get("phone_primary"), fields.get("phone_secondary"), fields.get("company"),
-        fields.get("designation"), fields.get("address"), fields.get("city"),
-        fields.get("pincode"), fields.get("website"), status, source_file or fields.get("source_file"),
-        normalize_email(fields.get("email_primary") or fields.get("email")),
-        phone_key(fields.get("phone_primary")), now_iso(), now_iso(),
-    ))
-    return cur.lastrowid
-
-
-def mark_pushed(con, contact_id):
-    con.execute("UPDATE eml_contacts SET pushed_to_crm = 1 WHERE id = ?", (contact_id,))
-
-
-def list_contacts(con, table, q="", page=1, size=50):
-    offset = (page - 1) * size
-    if q:
-        like = f"%{q}%"
-        rows = con.execute(f"""
-            SELECT * FROM {table} WHERE name LIKE ? OR email_primary LIKE ? OR phone_primary LIKE ? OR company LIKE ?
-            ORDER BY id DESC LIMIT ? OFFSET ?
-        """, (like, like, like, like, size, offset)).fetchall()
-        total = con.execute(f"""
-            SELECT count(*) FROM {table} WHERE name LIKE ? OR email_primary LIKE ? OR phone_primary LIKE ? OR company LIKE ?
-        """, (like, like, like, like)).fetchone()[0]
-    else:
-        rows = con.execute(f"SELECT * FROM {table} ORDER BY id DESC LIMIT ? OFFSET ?", (size, offset)).fetchall()
-        total = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-    return [dict(r) for r in rows], total
-
-
-def get_contact(con, table, contact_id):
-    r = con.execute(f"SELECT * FROM {table} WHERE id = ?", (contact_id,)).fetchone()
-    return dict(r) if r else None
-
-
-def update_contact(con, table, contact_id, fields):
-    sets = ", ".join(f"{k} = ?" for k in fields)
-    vals = list(fields.values()) + [contact_id]
-    con.execute(f"UPDATE {table} SET {sets} WHERE id = ?", vals)
-    return con.total_changes > 0
-
-
-def delete_contact(con, table, contact_id):
-    con.execute(f"DELETE FROM {table} WHERE id = ?", (contact_id,))
-    return con.total_changes > 0
-
-
 def _table_cols(con, table: str) -> set[str]:
     try:
         return {r[1] for r in con.execute(f"PRAGMA table_info({table})").fetchall()}
     except sqlite3.Error:
         return set()
-
 
 def counts():
     """DB counters for /api/status. Additive keys; missing tables (pre-migration
@@ -1102,12 +919,10 @@ def counts():
     finally:
         con.close()
 
-
 def is_processed(con, path, size, mtime):
     r = con.execute("SELECT 1 FROM processed_files WHERE path=? AND size=? AND mtime=?",
                     (path, size, mtime)).fetchone()
     return r is not None
-
 
 def mark_processed(con, path, size, mtime, status, detail=None, contacts_found=0):
     con.execute("""

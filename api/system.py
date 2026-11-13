@@ -1,6 +1,6 @@
 # api/system.py — health/status/autostart routes (INTERFACE_CONTRACTS §2.1).
 import os
-import subprocess
+
 import sys
 from pathlib import Path
 
@@ -13,12 +13,10 @@ import providers as _providers
 
 router = APIRouter()
 
-
 @router.get("/health")
 async def health():
     # Catalogue #1: liveness probe — net-new for Phase 2 (§3).
     return {"ok": True}
-
 
 @router.get("/status")
 async def status():
@@ -37,10 +35,8 @@ async def status():
         "version": "1.0.0",
     }
 
-
 def _autostart_path() -> Path:
     return Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / "CRM_Local.cmd"
-
 
 @router.post("/autostart")
 async def set_autostart(body: dict):
