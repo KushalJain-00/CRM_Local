@@ -15,20 +15,34 @@ DEFAULTS = {
     "watch_interval": 30,
     "autostart": False,
     "theme": "light",
-    # Reliability knobs (validated/clamped in api/settings.py; resolved with
-    # llm.default_reliability()). Prompts are edited only via /api/prompts.
+    # Reliability knobs: spec (defaults+bounds+copy) lives in llm.py beside
+    # default_reliability(); api/settings.py clamps against it. Prompts are
+    # edited only via /api/prompts.
     "reliability": {},
     "prompts": {},
 }
 
 
-def data_dir() -> Path:
+def _default_data_dir() -> Path:
+    """Where the app lives by default. Used by data_dir() and by the
+    migration-gate anchor, which must NOT follow config.data_dir()
+    monkeypatching (a stray redirect must never point the D-030 gate at
+    the wrong file). No mkdir — callers decide."""
     if os.name == "nt":
-        d = Path(os.environ.get("APPDATA") or Path.home()) / APP_NAME
-    else:
-        d = Path.home() / ".crm_local"
+        return Path(os.environ.get("APPDATA") or Path.home()) / APP_NAME
+    return Path.home() / ".crm_local"
+
+
+def data_dir() -> Path:
+    d = _default_data_dir()
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def canonical_db_path() -> Path:
+    """Canonical production DB path (D-030 gate anchor). Ignores any
+    monkeypatched data_dir; never creates directories."""
+    return _default_data_dir() / "crm.db"
 
 
 def config_path() -> Path:

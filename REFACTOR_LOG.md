@@ -115,3 +115,35 @@ after the NULL normalization above. New `tests/test_extract_parity.py`
 (orchestrator-level parity, deterministic/offline) is committed.
 
 Suite: **399 passed, 1 xfailed** (356 base + 39 new keys + 4 parity).
+
+## D-U3 (Phase 3, done): shared infrastructure
+
+- **Limits**: `services/limits.py` (MAX_FILE_SIZE, MAX_TOTAL_SIZE,
+  MAX_FILE_COUNT). intake dropped its private copies; pipeline's
+  MAX_SCAN_SIZE alias deleted (oversized pre-filter now uses MAX_FILE_SIZE);
+  api/intake derives MAX_* from limits; magic-byte gate moved into the xls/
+  pdf adapters (`check_signature`, raises before parse) — exact message and
+  hard-ERROR intake semantics preserved; api's stale `sys.path.insert` hack
+  deleted.
+- **Data directory**: app.py's copy deleted — `config.data_dir()` is the
+  single implementation. `db._live_db_file` delegates to config.
+  **Notable**: `config.data_dir()` is monkeypatchable by tests, but the
+  D-030 migration gate must anchor on the *canonical* path. config.py now
+  owns both resolvers (`data_dir()` configurable, `canonical_db_path()`
+  not; no mkdir) — all path logic in one module. One test
+  (test_live_db_file_is_canonical_home_path) caught the naive unification.
+- **Connections**: db.connect is the only connection factory (3 identical
+  defs collapsed; unused `_sqlite3` and compat lambdas gone). API
+  `_get_con()` copies in contacts/staged/emails/history/companies → db.connect()
+  (WAL+FK+Row everywhere, closing the FK gap on emails/history/companies-).
+  Row-factory transaction semantics unchanged. The unified DB keeps `which`
+  as an ignored parameter (tests pass "eml").
+- **Reliability spec**: defaults + bounds + descriptions now live together in
+  `llm.py` (`default_reliability`, `RELIABILITY_FIELDS`,
+  `RELIABILITY_DESCRIPTIONS`); api/settings derives from them; stale inline
+  `import llm`s removed. New `tests/test_reliability_config.py` pins the
+  contract (8 passed).
+- Suite: **407 passed, 1 xfailed**.
+
+Behaviour notes for report: api emails/history/companies now enforce the
+same FK pragma as the rest of the app (previously silently off there).

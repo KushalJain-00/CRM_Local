@@ -9,6 +9,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import config
+import llm
+
+RELIABILITY_FIELDS = llm.RELIABILITY_FIELDS
+RELIABILITY_DESCRIPTIONS = llm.RELIABILITY_DESCRIPTIONS
+
 router = APIRouter()
 
 
@@ -215,20 +220,7 @@ async def set_mode(body: ModeIn):
 
 # ── Provider catalog, model discovery & connection testing ──────────────────
 
-RELIABILITY_FIELDS = {
-    "timeout_s": (5.0, 600.0),
-    "attempts": (1, 6),
-    "backoff_initial_s": (0.0, 60.0),
-    "backoff_max_s": (0.0, 300.0),
-    "deadline_s": (10.0, 1800.0),
-    "repair_attempts": (0, 3),
-    "cooldown_s": (0.0, 3600.0),
-    "fail_threshold": (1, 50),
-}
-
-
 def _clamp_reliability(raw: Any) -> dict:
-    import llm
     base = llm.default_reliability()
     out = dict(base)
     for key, (lo, hi) in RELIABILITY_FIELDS.items():
@@ -268,7 +260,6 @@ def _resolve_entry(body: dict) -> tuple[dict, bool]:
 
 @router.get("/providers/catalog")
 async def get_catalog():
-    import llm
     import providers as prov
     return {
         "catalog": [
@@ -290,7 +281,6 @@ async def get_catalog():
 
 @router.post("/providers/models")
 async def discover_models(body: dict):
-    import llm
     import providers
     entry, _ = _resolve_entry(body)
     if entry.get("provider") not in providers.PROVIDERS:
@@ -304,7 +294,6 @@ async def discover_models(body: dict):
 
 @router.post("/providers/test")
 async def test_provider(body: dict):
-    import llm
     entry, _ = _resolve_entry(body)
     result = await llm.test_entry(entry)
     ok = result == "ok"
@@ -314,7 +303,6 @@ async def test_provider(body: dict):
 
 @router.get("/reliability")
 async def get_reliability():
-    import llm
     stored = config.load().get("reliability") or {}
     return {"reliability": {**llm.default_reliability(), **stored},
             "descriptions": RELIABILITY_DESCRIPTIONS}
@@ -332,17 +320,6 @@ async def set_reliability(body: dict):
 def _utcnow() -> str:
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-RELIABILITY_DESCRIPTIONS = {
-    "timeout_s": "Seconds before a single provider request times out.",
-    "attempts": "Try-again rounds per provider entry before falling over.",
-    "backoff_initial_s": "Wait before the first retry (doubled per attempt).",
-    "backoff_max_s": "Cap on a single retry wait.",
-    "deadline_s": "Total seconds an extraction may spend across the chain.",
-    "repair_attempts": "Rounds asking a provider to fix malformed JSON.",
-    "cooldown_s": "How long a failing entry is paused after repeated errors.",
-    "fail_threshold": "Consecutive transient failures before an entry is paused.",}
 
 
 # ── Editable extraction prompt store (Part 4) ────────────────────────────────

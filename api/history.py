@@ -3,11 +3,10 @@
 # contacts found, processed_at — straight from the per-file ledger the pipeline writes.
 import logging
 import os
-import sqlite3
 
 from fastapi import APIRouter, Query
 
-import config as _config
+import db
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -15,17 +14,11 @@ router = APIRouter()
 _MAX_ROWS = 500
 
 
-def _get_con():
-    con = sqlite3.connect(_config.db_path("crm"), timeout=30)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA foreign_keys=ON")
-    return con
 
 
 @router.get("/history")
 async def list_history(limit: int = Query(_MAX_ROWS, ge=1, le=_MAX_ROWS)):
-    con = _get_con()
+    con = db.connect()
     try:
         rows = con.execute(
             "SELECT path, status, detail, contacts_found, processed_at"

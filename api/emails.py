@@ -1,12 +1,11 @@
 # api/emails.py — eml_emails listing with per-email extracted-contact counts.
 # contact_count = contacts the pipeline extracted from that email (email_staged_links).
 import logging
-import sqlite3
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-import config as _config
+import db
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -15,12 +14,6 @@ _MAX_SIZE = 500
 _DEFAULT_SIZE = 25
 
 
-def _get_con():
-    con = sqlite3.connect(_config.db_path("crm"), timeout=30)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA foreign_keys=ON")
-    return con
 
 
 def _link_table(con) -> Optional[str]:
@@ -37,7 +30,7 @@ async def list_emails(
     size: int = Query(_DEFAULT_SIZE, ge=1, le=_MAX_SIZE),
     q: Optional[str] = None,
 ):
-    con = _get_con()
+    con = db.connect()
     try:
         where, params = "1=1", []
         if q and q.strip():

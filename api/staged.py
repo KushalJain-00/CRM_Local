@@ -5,9 +5,8 @@ from fastapi.responses import JSONResponse
 import json
 import logging
 import math
-import sqlite3
 from datetime import datetime
-import config as _config
+import db
 from services.keys import (
     normalize_email, phone_key, normalize_name, record_keys,
 )
@@ -46,12 +45,6 @@ class BulkApproveRejectIn(BaseModel):
 
 # ── DB helper ─────────────────────────────────────────────────────────────
 
-def _get_con():
-    con = sqlite3.connect(_config.db_path("crm"), timeout=30)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA foreign_keys=ON")
-    return con
 
 
 def _exec(con, sql, params=()):
@@ -92,7 +85,7 @@ async def list_staged_contacts(
     q: Optional[str] = None,
 ):
     """List staged contacts with optional filtering and pagination."""
-    con = _get_con()
+    con = db.connect()
     try:
         _require_staged_table(con)
         # Build WHERE clause
@@ -141,7 +134,7 @@ async def list_staged_contacts(
 @router.get("/staged-contacts/{staged_id}")
 async def get_staged_contact(staged_id: int):
     """Get a single staged contact by ID."""
-    con = _get_con()
+    con = db.connect()
     try:
         _require_staged_table(con)
         row = con.execute("SELECT * FROM staged_contacts WHERE id = ?", (staged_id,)).fetchone()
@@ -250,7 +243,7 @@ def _approve_ids(con, staged_ids: List[int]) -> dict:
 
 
 def _approve_ids_logged(staged_ids: List[int]) -> dict:
-    con = _get_con()
+    con = db.connect()
     try:
         _require_staged_table(con)
         outcome = _approve_ids(con, staged_ids)
@@ -287,7 +280,7 @@ async def bulk_staged_action(
         outcome = _approve_ids_logged(body.staged_ids)
         return {"ok": True, **outcome}
     if body.action in ("reject", "dismiss"):
-        con = _get_con()
+        con = db.connect()
         try:
             _require_staged_table(con)
             now = datetime.utcnow().isoformat()
@@ -345,7 +338,7 @@ async def reject_staged_contact(
     staged_id: int,
 ):
     """Reject a staged contact (canonical CRM stays untouched)."""
-    con = _get_con()
+    con = db.connect()
     try:
         _require_staged_table(con)
         if not _decide_one(con, staged_id, "REJECTED", "IMPORT_FAILED"):
@@ -366,7 +359,7 @@ async def dismiss_staged_contact(
     staged_id: int,
 ):
     """Dismiss a staged contact (remove from queue, keep data for audit)."""
-    con = _get_con()
+    con = db.connect()
     try:
         _require_staged_table(con)
         if not _decide_one(con, staged_id, "DISMISSED", "NOT_IMPORTED"):
@@ -415,7 +408,7 @@ async def patch_staged_contact(
     body: StagedFieldsIn,
 ):
     """Patch a staged contact's fields before approval (frontend edit drawer)."""
-    con = _get_con()
+    con = db.connect()
     try:
         _require_staged_table(con)
         exists = con.execute(
@@ -443,7 +436,7 @@ async def edit_staged_contact(
 ):
     """Edit a staged contact's fields before approval."""
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
-    con = _get_con()
+    con = db.connect()
     try:
         _require_staged_table(con)
         exists = con.execute(
@@ -464,7 +457,7 @@ async def check_staged_dedup(
     name: Optional[str] = None,
 ):
     """Check for duplicates among staged contacts and existing CRM contacts."""
-    con = _get_con()
+    con = db.connect()
     try:
         _require_staged_table(con)
         duplicate_reason = None
@@ -537,7 +530,7 @@ async def merge_staged_contact(
     staged_id: int,
 ):
     """Merge a staged contact with existing CRM contact (local-wins semantics)."""
-    con = _get_con()
+    con = db.connect()
     try:
         _require_staged_table(con)
         sc = con.execute("SELECT * FROM staged_contacts WHERE id = ?", (staged_id,)).fetchone()

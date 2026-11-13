@@ -3,19 +3,12 @@ from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
-import sqlite3
-import config as _config
+import db
 from datetime import datetime
 
 router = APIRouter()
 
 
-def _get_con():
-    con = sqlite3.connect(_config.db_path("crm"), timeout=30)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA foreign_keys=ON")
-    return con
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────
@@ -37,7 +30,7 @@ async def list_companies(
     q: Optional[str] = None,
 ):
     """List companies with optional search."""
-    con = _get_con()
+    con = db.connect()
     try:
         where = "1=1"
         params = []
@@ -72,7 +65,7 @@ import math
 @router.get("/companies/{company_id}")
 async def get_company(company_id: int):
     """Get a single company by ID."""
-    con = _get_con()
+    con = db.connect()
     try:
         row = con.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
         if row is None:
@@ -87,7 +80,7 @@ async def create_company(
     body: CompanyIn,
 ):
     """Create a new company."""
-    con = _get_con()
+    con = db.connect()
     try:
         now = datetime.utcnow().isoformat()
         con.execute(
@@ -115,7 +108,7 @@ async def update_company(
     body: CompanyIn,
 ):
     """Update a company."""
-    con = _get_con()
+    con = db.connect()
     try:
         # Check if company exists
         existing = con.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
@@ -170,7 +163,7 @@ async def delete_company(
     company_id: int,
 ):
     """Delete a company (not supported - check for dependents)."""
-    con = _get_con()
+    con = db.connect()
     try:
         existing = con.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
         if existing is None:
@@ -189,9 +182,7 @@ async def delete_company(
 
         con.close()
         # Actually delete
-        con2 = sqlite3.connect(_config.db_path("crm"), timeout=30)
-        con2.execute("PRAGMA journal_mode=WAL")
-        con2.execute("PRAGMA foreign_keys=ON")
+        con2 = db.connect()
         con2.execute("DELETE FROM companies WHERE id = ?", (company_id,))
         con2.commit()
         con2.close()

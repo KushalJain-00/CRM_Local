@@ -13,11 +13,6 @@ from services.limits import MAX_TOTAL_SIZE
 
 logger = logging.getLogger(__name__)
 
-_MAGIC = {
-    "xls": [b"\xd0\xcf\x11\xe0", b"\x09\x08\x08\x00"],
-    "pdf": [b"%PDF"],
-}
-
 _SPOOL_RE = re.compile(r"^\d+~\d+~")
 
 
@@ -53,14 +48,6 @@ async def universal_intake(files, chain=None, options=None):
                 total_size += size
                 if total_size > MAX_TOTAL_SIZE:
                     raise ValueError(f"total upload size exceeds {MAX_TOTAL_SIZE // (1024 * 1024)}MB")
-
-                # Magic bytes for formats whose parsers trust the header.
-                ext = os.path.splitext(name)[1].lower()
-                if ext in (".xls", ".pdf"):
-                    with open(uf_path, "rb") as fh:
-                        head = fh.read(8)
-                    if not any(head[:len(m)] == m for m in _MAGIC[ext.lstrip(".")]):
-                        raise ValueError(f"file content does not match {ext} format")
 
                 outcome = await process_source(
                     con, uf_path, chain=chain,

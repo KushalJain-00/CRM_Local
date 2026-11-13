@@ -1,6 +1,5 @@
 # api/intake.py — universal multipart intake (INTERFACE_CONTRACTS §2.1 ★ Phase 2)
 import os
-import sys
 from pathlib import Path
 
 import config
@@ -11,9 +10,11 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 router = APIRouter()
 
 
-MAX_FILES = 50
-MAX_SIZE_PER_FILE_MB = 10
-MAX_SIZE_TOTAL_MB = 100
+from services.limits import MAX_FILE_COUNT, MAX_FILE_SIZE, MAX_TOTAL_SIZE
+
+MAX_FILES = MAX_FILE_COUNT
+MAX_SIZE_PER_FILE_MB = MAX_FILE_SIZE // (1024 * 1024)
+MAX_SIZE_TOTAL_MB = MAX_TOTAL_SIZE // (1024 * 1024)
 
 
 def _spool_uploads(upload_files):
@@ -51,10 +52,7 @@ def _unspool(spooled):
             pass
 
 
-# Root-level intake module (services package partially unavailable until
-# __init__.py is populated); import directly from the project top-level intake.
-sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
-from intake import universal_intake as _universal_intake  # type: ignore
+from intake import universal_intake as _universal_intake
 
 
 @router.post("/intake")

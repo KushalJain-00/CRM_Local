@@ -64,6 +64,21 @@ _CONTACT_MAP = (
     ("website", "website"),
 )
 
+_MAGIC = {
+    "xls": [b"\xd0\xcf\x11\xe0", b"\x09\x08\x08\x00"],
+    "pdf": [b"%PDF"],
+}
+
+
+def check_signature(file_path: str, ext: str) -> None:
+    """Reject files whose bytes do not match the extension they claim.
+    Raises ValueError; adapters call this before opening their parser."""
+    with open(file_path, "rb") as fh:
+        head = fh.read(16)
+    if not any(head[:len(m)] == m for m in _MAGIC[ext]):
+        raise ValueError(f"file content does not match .{ext} format")
+
+
 _ORIGIN_KEYS = ("name", "email", "phone_primary", "company",
                 "designation", "address", "city", "pincode", "website")
 

@@ -72,6 +72,31 @@ def default_reliability() -> dict:
     }
 
 
+# Reliability knob specification: bounds and human copy live with the defaults
+# so the API surface is derived, never re-declared (AGENTS.md: one spec).
+RELIABILITY_FIELDS = {
+    "timeout_s": (5.0, 600.0),
+    "attempts": (1, 6),
+    "backoff_initial_s": (0.0, 60.0),
+    "backoff_max_s": (0.0, 300.0),
+    "deadline_s": (10.0, 1800.0),
+    "repair_attempts": (0, 3),
+    "cooldown_s": (0.0, 3600.0),
+    "fail_threshold": (1, 50),
+}
+
+RELIABILITY_DESCRIPTIONS = {
+    "timeout_s": "Seconds before a single provider request times out.",
+    "attempts": "Try-again rounds per provider entry before falling over.",
+    "backoff_initial_s": "Wait before the first retry (doubled per attempt).",
+    "backoff_max_s": "Cap on a single retry wait.",
+    "deadline_s": "Total seconds an extraction may spend across the chain.",
+    "repair_attempts": "Rounds asking a provider to fix malformed JSON.",
+    "cooldown_s": "How long a failing entry is paused after repeated errors.",
+    "fail_threshold": "Consecutive transient failures before an entry is paused.",
+}
+
+
 def parse_json(raw: str) -> dict | None:
     if not raw:
         return None

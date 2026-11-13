@@ -31,16 +31,6 @@ BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 STATIC = BASE / "static"
 
 
-# Canonical data directory: .crm_local on POSIX, APPDATA/CRM_Local on Windows.
-# Must match config.data_dir() and db.db_path() for cross-platform consistency.
-def data_dir() -> Path:
-    if os.name == "nt":
-        d = Path(os.environ.get("APPDATA") or Path.home()) / "CRM_Local"
-    else:
-        d = Path.home() / ".crm_local"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
 
 # Loopback hosts for SEC-03 (D-028c): rejected before Host is considered.
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}

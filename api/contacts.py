@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-import config as _config
+import db
 from services.keys import record_keys
 
 logger = logging.getLogger(__name__)
@@ -27,12 +27,6 @@ class ContactFieldsIn(BaseModel):
     fields: dict
 
 
-def _get_con():
-    con = sqlite3.connect(_config.db_path("crm"), timeout=30)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA foreign_keys=ON")
-    return con
 
 
 def _has_deleted_at(con) -> bool:
@@ -55,7 +49,7 @@ async def list_contacts(
         raise HTTPException(422, f"sort must be one of {sorted(_SORT_ALLOWLIST)}")
     if dir not in ("asc", "desc"):
         raise HTTPException(422, "dir must be 'asc' or 'desc'")
-    con = _get_con()
+    con = db.connect()
     try:
         live = _live_clause(con)
         where, params = f"({live})", []
@@ -79,7 +73,7 @@ async def list_contacts(
 
 @router.get("/contacts/{contact_id}")
 async def get_contact(contact_id: int):
-    con = _get_con()
+    con = db.connect()
     try:
         live = _live_clause(con)
         row = con.execute(
@@ -101,7 +95,7 @@ async def update_contact(contact_id: int, body: ContactFieldsIn):
         raise HTTPException(422, f"unknown fields: {', '.join(unknown)}")
     if not fields:
         raise HTTPException(422, "no fields to update")
-    con = _get_con()
+    con = db.connect()
     try:
         live = _live_clause(con)
         row = con.execute(
@@ -139,7 +133,7 @@ async def update_contact(contact_id: int, body: ContactFieldsIn):
 @router.delete("/contacts/{contact_id}")
 async def delete_contact(contact_id: int):
     """D-014: soft-delete (deleted_at), never a hard DELETE of the row."""
-    con = _get_con()
+    con = db.connect()
     try:
         if not _has_deleted_at(con):
             raise HTTPException(409, "soft-delete column missing — run the migration train first")

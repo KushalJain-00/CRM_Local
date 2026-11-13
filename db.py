@@ -312,13 +312,10 @@ class MigrationError(RuntimeError):
 
 
 def _live_db_file() -> str:
-    """Canonical production DB path (mirrors config.data_dir default), resolved
-    at call time so test monkeypatches on config.data_dir do not affect it."""
-    if os.name == "nt":
-        d = Path(os.environ.get("APPDATA") or Path.home()) / "CRM_Local"
-    else:
-        d = Path.home() / ".crm_local"
-    return os.path.realpath(d / "crm.db")
+    """Canonical production DB path (D-030 gate anchor). Delegates to
+    config so there is exactly one path implementation; deliberately NOT
+    config.data_dir(), which tests legitimately monkeypatch."""
+    return os.path.realpath(str(config.canonical_db_path()))
 
 
 def _con_db_file(con: sqlite3.Connection) -> str:
@@ -866,46 +863,6 @@ def restore_database(backup, dest=None) -> str:
     os.replace(tmp_path, dest_path)
     return dest_path
 
-
-# Backward-compatible aliases
-connect_crm = lambda: connect("crm")
-connect_eml = lambda: connect("crm")  # Both connect to unified DB now
-
-# Preserve old function names for backward compat
-def connect(which: str = "crm") -> sqlite3.Connection:
-    con = sqlite3.connect(config.db_path("crm"), timeout=30)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA foreign_keys=ON")
-    return con
-
-
-# Keep original functions that other modules depend on
-# (upsert_contact, insert_email, insert_eml_contact, mark_pushed, list_contacts, etc.)
-# These are in the original db.py — import them from here for backward compat
-
-# Re-export from original module structure
-import sqlite3 as _sqlite3
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-# The following functions are preserved from the original db.py:
-# normalize_email, phone_key (above), DedupIndex, upsert_contact, insert_email,
-# insert_eml_contact, mark_pushed, list_contacts, get_contact, update_contact,
-# delete_contact, counts, is_processed, mark_processed
-
-# For backward compat, provide connect(which) that ignores 'which' param
-def connect(which: str = "crm") -> sqlite3.Connection:
-    con = sqlite3.connect(config.db_path("crm"), timeout=30)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA foreign_keys=ON")
-    return con
-
-
-# Import original helper functions by exec'ing the old db.py logic
-# (We'll keep them inline for simplicity)
 
 class DedupIndex:
     def __init__(self):
