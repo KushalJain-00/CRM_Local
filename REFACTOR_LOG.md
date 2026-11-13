@@ -313,3 +313,15 @@ Subagent re-audit #2 confirmed round-1 fixes hold. Fixed here:
   `html.sb-collapsed` which boot.js sets correctly.
 - Suite: **400 passed**; contract_audit MISSING DEFINITIONS: none; browser
   E2E green again on final code (including bulk-approve UI call).
+
+## D-U9 (Phase 6): test isolation gap — live DB never opened again
+
+`tests/test_app.py` called `db.init()` in its autouse fixture against the
+DEFAULT data dir — opening (never writing) the user's live
+~/.crm_local/crm.db at every test session. Pre-existing; it caused the 19:29
+mtime drift on the directory (WAL open/close cycle) with zero content or
+mtime change to any live file (verified: all files older than Nov 11).
+Fixed by depending on the `data_dir` fixture (isolated tmp DB). All
+assertions in the file are data-independent; suite stays 400 green.
+The live database remains byte-untouched: zero writes, zero schema ops,
+zero migration attempts (contents and mtimes unchanged since Nov 10).

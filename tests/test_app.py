@@ -8,17 +8,11 @@ client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def ensure_db_initialized():
-    """Ensure the database is initialized before each test.
-    
-    The FastAPI lifespan calls db.init(), but only when TestClient is used
-    as a context manager. This fixture guarantees initialization for tests
-    that don't use the context manager directly.
-    """
-    # The TestClient without context manager doesn't trigger lifespan,
-    # so we init here to ensure the database exists.
+def ensure_db_initialized(data_dir):
+    """Ensure the database is initialized before each test, on an isolated
+    temporary data dir — tests must never open the live database."""
     db.init()
-    return None
+    return data_dir
 
 
 def test_index():
