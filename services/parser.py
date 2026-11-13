@@ -2,6 +2,7 @@ import xlrd
 import re
 import time
 import os
+from services.keys import EMAIL_RE
 
 
 def parse_xls(content: bytes) -> dict:
@@ -76,7 +77,6 @@ def parse_xls(content: bytes) -> dict:
     return {"sheet": combined_name, "headers": all_headers, "rows": all_rows}
 
 
-_EMAIL_RE_SIMPLE = re.compile(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}")
 
 
 def _looks_like_header(row: list) -> bool:
@@ -86,7 +86,7 @@ def _looks_like_header(row: list) -> bool:
     if len(nonempty) < 2:
         return False
     joined = " ".join(nonempty)
-    if _EMAIL_RE_SIMPLE.search(joined):
+    if EMAIL_RE.search(joined):
         return False
     digits = re.sub(r"\D", "", joined)
     if len(digits) >= 7:  # contains a phone-like number → data row

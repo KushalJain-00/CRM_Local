@@ -12,9 +12,9 @@ from dataclasses import dataclass, field
 import config
 import db
 import llm
-from services import staging, parse
+from services import staging
 from services.adapters import (
-    get_adapter, eml_to_normalized, contract_to_normalized,
+    get_adapter, eml_to_normalized, NormalizedContact,
 )
 from services.eml_processor import (
     extract_local_fields, merge_fields, build_llm_prompt,
@@ -105,17 +105,19 @@ async def process_source(con, path: str, *, chain: list | None = None,
 
         # ── Documents (.csv/.xlsx/.xls/.pdf/.txt): deterministic + AI gap-fill ──
         elif chain:
-            try:
-                table = parse.read_table(path)
-            except Exception:
-                table = None
+            table = getattr(result, "table", None)
             if table is not None:
                 ai_contacts, ai_notes = await assist_document(
                     table, name=name, chain=chain, cfg=cfg,
                     source_type="spreadsheet")
                 warnings.extend(ai_notes)
                 contacts.extend(
-                    contract_to_normalized(ac, source_file=name) for ac in ai_contacts)
+                    NormalizedContact(source_file=name, **{k: ac.get(k) for k in (
+                        "name", "email_primary", "email_secondary",
+                        "phone_primary", "phone_secondary", "whatsapp",
+                        "company", "designation", "address", "city",
+                        "pincode", "website", "field_origin", "confidence")})
+                    for ac in ai_contacts)
 
         # ── Stage: every contact lands in the review queue ───────────────
         staged = staging.stage_contacts(

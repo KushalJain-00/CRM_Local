@@ -149,8 +149,17 @@ def _canon_keys(sc) -> dict:
     normalizers — identical to what staged rows were written with."""
     return record_keys(dict(sc))
 
+# staged/canonical column → its dedup-key column
+_KEY_BY_FIELD = {"name": "name_key", "phone_primary": "phone_key",
+                 "company": "company_key", "website": "website_key"}
+
+
 def _enrich_existing(con, existing_id: int, sc) -> None:
-    """Local-wins merge: only fill fields that are empty in the canonical row."""
+    """Local-wins merge: only fill fields that are empty in the canonical row.
+
+    Key-bearing columns are recomputed after filling so canonical rows never
+    carry NULL keys for populated values."""
+    changed = set()
     for staged_col, canon_col in _CONTACT_FIELD_MAP.items():
         val = sc[staged_col] if staged_col in sc.keys() else None
         if val is None:
@@ -159,6 +168,36 @@ def _enrich_existing(con, existing_id: int, sc) -> None:
             f"SELECT {canon_col} FROM contacts WHERE id = ?", (existing_id,)).fetchone()[0]
         if existing_val == "" or existing_val is None:
             con.execute(f"UPDATE contacts SET {canon_col} = ? WHERE id = ?", (val, existing_id))
+            changed.add(canon_col)
+    key_cols = changed & set(_KEY_BY_FIELD)
+    if key_cols:
+        row = con.execute(
+            "SELECT name, phone_primary, company, website FROM contacts WHERE id = ?",
+            (existing_id,)).fetchone()
+        keys = record_keys({"name": row[0], "phone_primary": row[1],
+                            "company": row[2], "website": row[3]})
+        for canon_col in key_cols:
+            con.execute(f"UPDATE contacts SET {_KEY_BY_FIELD[canon_col]} = ? WHERE id = ?",
+                        (keys[_KEY_BY_FIELD[canon_col]], existing_id))
+
+def _find_contact_by_identity(con, email, phone):
+    """Shared identity lookup for approval/merge. Email matches
+    case/space-insensitively (legacy rows may predate email_key); phone matches
+    through the authoritative key."""
+    existing = None
+    e = normalize_email(email)
+    if e:
+        existing = con.execute(
+            "SELECT id FROM contacts WHERE email_primary IS NOT NULL AND lower(email_primary) = ?"
+            " ORDER BY id LIMIT 1", (e,)).fetchone()
+    if existing is None:
+        pk = phone_key(phone)
+        if pk:
+            existing = con.execute(
+                "SELECT id FROM contacts WHERE phone_key = ? ORDER BY id LIMIT 1",
+                (pk,)).fetchone()
+    return existing
+
 
 def _insert_contact(con, sc) -> int:
     keys = _canon_keys(sc)
@@ -197,17 +236,7 @@ def _approve_ids(con, staged_ids: List[int]) -> dict:
         if sc["review_status"] == "APPROVED":
             already += 1  # replay-safe: never double-commit
             continue
-        email = normalize_email(sc["email"]) or None
-        phone_digits = phone_key(sc["phone_primary"])
-        existing = None
-        if email:
-            existing = con.execute(
-                "SELECT id FROM contacts WHERE email_primary IS NOT NULL AND lower(email_primary) = ?"
-                " ORDER BY id LIMIT 1", (email,)).fetchone()
-        if existing is None and phone_digits:
-            existing = con.execute(
-                "SELECT id FROM contacts WHERE phone_key = ? ORDER BY id LIMIT 1",
-                (phone_digits,)).fetchone()
+        existing = _find_contact_by_identity(con, sc["email"], sc["phone_primary"])
 
         if existing:
             _enrich_existing(con, existing["id"], sc)
@@ -369,10 +398,23 @@ def _apply_field_edits(con, staged_id: int, fields: dict) -> bool:
     fields = {k: v for k, v in fields.items() if v is not None}
     if not fields:
         return False
+    _STAGED_KEY = {"name": "name_key", "email": "email_key",
+                   "phone_primary": "phone_key", "company": "company_key",
+                   "website": "website_key"}
     set_clause = ", ".join(f"{k} = ?" for k in fields)
     vals = list(fields.values()) + [staged_id]
     cur = con.execute(
         f"UPDATE staged_contacts SET {set_clause}, updated_at = datetime('now') WHERE id = ?", vals)
+    key_fields = {k for k in fields if k in _STAGED_KEY}
+    if key_fields:
+        row = con.execute(
+            "SELECT name, email, phone_primary, company, website FROM staged_contacts WHERE id = ?",
+            (staged_id,)).fetchone()
+        keys = record_keys({"name": row[0], "email": row[1], "email_primary": row[1],
+                            "phone_primary": row[2], "company": row[3], "website": row[4]})
+        for k in key_fields:
+            con.execute(f"UPDATE staged_contacts SET {_STAGED_KEY[k]} = ? WHERE id = ?",
+                        (keys[_STAGED_KEY[k]], staged_id))
     return cur.rowcount > 0
 
 @router.patch("/staged-contacts/{staged_id}")
@@ -508,10 +550,7 @@ async def merge_staged_contact(
         if sc is None:
             raise HTTPException(404, "Staged contact not found")
 
-        email = (sc["email"] or "").strip().lower() or None
-        existing = con.execute(
-            "SELECT * FROM contacts WHERE email_primary IS NOT NULL AND lower(email_primary) = ?"
-            " ORDER BY id LIMIT 1", (email,)).fetchone() if email else None
+        existing = _find_contact_by_identity(con, sc["email"], sc["phone_primary"])
         now = datetime.utcnow().isoformat()
 
         if existing:

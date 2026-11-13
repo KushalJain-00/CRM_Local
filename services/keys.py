@@ -19,7 +19,7 @@ def normalize_email(email: str | None) -> str:
     return (email or "").strip().lower()
 
 
-def normalize_phone(phone: str | None) -> str:
+def _digits_only(phone: str | None) -> str:
     return re.sub(r"\D", "", phone or "")
 
 
@@ -93,7 +93,7 @@ def is_duplicate(email, phone, existing_emails: set[str], existing_phones: set[s
     e = normalize_email(email)
     if e and e in existing_emails:
         return "email"
-    p = normalize_phone(phone)
+    p = _digits_only(phone)
     if len(p) >= 10:
         # substring either way handles +91/landline variance
         for ep in existing_phones:

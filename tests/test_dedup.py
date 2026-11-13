@@ -1,16 +1,12 @@
 """Tests for Phase 1 dedup comparison layer (services/dedup)."""
 
 from services import dedup
-from services.keys import normalize_email, phone_key
+from services.keys import (
+    normalize_email, phone_key, name_key, company_key, website_key,
+)
 
 
 class TestReuseSharedCore:
-
-    def test_phone_key_is_reused_not_reimplemented(self):
-        assert dedup.phone_key is phone_key
-
-    def test_normalize_email_is_reused_not_reimplemented(self):
-        assert dedup.normalize_email is normalize_email
 
     def test_email_key_delegates_to_shared_rule(self):
         assert dedup.email_key("  Ravi@Acme.IN ") == "ravi@acme.in"
@@ -19,29 +15,29 @@ class TestReuseSharedCore:
 class TestNormalizers:
 
     def test_name_key_strips_and_lowercases(self):
-        assert dedup.name_key("  Ravi   Kumar ") == "ravi kumar"
+        assert name_key("  Ravi   Kumar ") == "ravi kumar"
 
     def test_name_key_strips_honorifics(self):
-        assert dedup.name_key("Mr. Ravi Kumar") == "ravi kumar"
-        assert dedup.name_key("Dr Ravi Kumar") == "ravi kumar"
+        assert name_key("Mr. Ravi Kumar") == "ravi kumar"
+        assert name_key("Dr Ravi Kumar") == "ravi kumar"
 
     def test_company_key_strips_legal_suffixes(self):
-        assert dedup.company_key("Acme Drilling Pvt Ltd") == "acme drilling"
-        assert dedup.company_key("The Acme Co") == "acme"
+        assert company_key("Acme Drilling Pvt Ltd") == "acme drilling"
+        assert company_key("The Acme Co") == "acme"
 
     def test_website_key_normalizes(self):
-        assert dedup.website_key("https://www.Acme.in/about") == "acme.in"
+        assert website_key("https://www.Acme.in/about") == "acme.in"
 
     def test_empty_values_return_none(self):
-        assert dedup.name_key("") is None
-        assert dedup.name_key(None) is None
-        assert dedup.company_key("") is None
+        assert name_key("") is None
+        assert name_key(None) is None
+        assert company_key("") is None
         assert dedup.email_key("") is None
 
     def test_phone_key_collapse_india_variance(self):
-        a = dedup.phone_key("+91 98765 43210")
-        b = dedup.phone_key("09876543210")
-        c = dedup.phone_key("9876543210")
+        a = phone_key("+91 98765 43210")
+        b = phone_key("09876543210")
+        c = phone_key("9876543210")
         assert a == b == c == "9876543210"
 
 

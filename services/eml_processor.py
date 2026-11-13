@@ -1,3 +1,4 @@
+from services.keys import EMAIL_RE
 # services/eml_processor.py
 """Parse .eml bytes → headers/body/signature; local field extraction; LLM merge."""
 import re, email, html as html_mod
@@ -12,7 +13,6 @@ SIG_DELIM = re.compile(
     r"thanks\s*&\s*regards|thanks\s+and\s+regards|sent from my|with regards)",
     re.I,
 )
-EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}")
 PHONE_RE = re.compile(
     r"(?:\+91[\s\-]?)?[6-9]\d{4}[\s\-]?\d{5}"    # Indian mobile: 10 digits, optional mid-split
     r"|\+\d{1,3}[\s\-]?\d{7,14}"                  # international: min 7 digits after code

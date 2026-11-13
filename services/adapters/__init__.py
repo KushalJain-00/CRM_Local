@@ -44,6 +44,9 @@ class ExtractionResult:
     # .eml adapters stash the parsed message here so the pipeline can link the
     # email row and build the LLM prompt without re-parsing the file.
     parsed: object | None = None
+    # Table adapters stash the parsed table so the AI gap-fill stage can chunk
+    # the same rows without re-reading/re-parsing the file.
+    table: dict | None = None
 
 # crm-extraction.v1 / merged FIELD_KEYS → normalized-contact boundary.
 # One table, one place; every producer of contacts flows through it.
@@ -92,26 +95,6 @@ def eml_to_normalized(merged: dict, ai: dict | None, *, source_file: str,
     nc.cc_emails = cc_emails
     nc.bcc_emails = bcc_emails
     return nc
-
-def contract_to_normalized(ac: dict, *, source_file: str) -> NormalizedContact:
-    """assist_document output (already contract-validated) → internal contact."""
-    return NormalizedContact(
-        name=ac.get("name"),
-        email_primary=ac.get("email_primary"),
-        email_secondary=ac.get("email_secondary"),
-        phone_primary=ac.get("phone_primary"),
-        phone_secondary=ac.get("phone_secondary"),
-        whatsapp=ac.get("whatsapp"),
-        company=ac.get("company"),
-        designation=ac.get("designation"),
-        address=ac.get("address"),
-        city=ac.get("city"),
-        pincode=ac.get("pincode"),
-        website=ac.get("website"),
-        source_file=source_file,
-        field_origin=ac.get("field_origin"),
-        confidence=ac.get("confidence") or 0.3,
-    )
 
 @runtime_checkable
 class ExtractionAdapter(Protocol):

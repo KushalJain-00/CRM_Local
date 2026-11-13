@@ -12,7 +12,6 @@ from email.parser import BytesHeaderParser
 import config
 import db
 from services.extract import process_source
-from services.limits import MAX_FILE_SIZE
 
 CRM_EXTS = (".xlsx", ".xls", ".csv", ".pdf")
 EML_EXTS = (".eml",)
@@ -95,31 +94,24 @@ def _eml_sort_key(path: str) -> tuple:
 
 
 def _pending(directory: str, which: str, exts: tuple[str, ...]) -> list[str]:
+    """Unprocessed files only, in processing order. Read-only — the ledger is
+    written by services/extract.py, never here (status polls hit this)."""
     paths = _files(directory, exts)
-    if which == "eml":
-        paths.sort(key=_eml_sort_key)
-    else:
-        paths.sort(key=lambda p: os.path.basename(p).lower())
     con = db.connect(which)
     try:
-        out = []
+        pending = []
         for path in paths:
             try:
                 st = os.stat(path)
             except OSError:
                 continue
-            if st.st_size > MAX_FILE_SIZE:
-                # SEC-07: skip + record as error so oversized files are never
-                # read whole (OOM) and stop being counted as pending.
-                db.mark_processed(
-                    con, path, st.st_size, st.st_mtime, "error",
-                    f"file exceeds {MAX_FILE_SIZE // (1024 * 1024)}MB scan size cap",
-                )
-                con.commit()
-                continue
             if not db.is_processed(con, path, st.st_size, st.st_mtime):
-                out.append(path)
-        return out
+                pending.append((path, st))
+        if which == "eml":
+            pending.sort(key=lambda item: _eml_sort_key(item[0]))
+        else:
+            pending.sort(key=lambda item: os.path.basename(item[0]).lower())
+        return [p for p, _ in pending]
     finally:
         con.close()
 

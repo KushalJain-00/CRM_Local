@@ -57,4 +57,4 @@ def contacts_from_table(path: str, table: dict, adapter: str) -> ExtractionResul
     if skipped:
         warnings.append(f"{skipped} row(s) skipped — no email or phone present")
     return ExtractionResult(contacts=contacts, warnings=warnings,
-                            adapter=adapter, local_only=True)
+                            adapter=adapter, local_only=True, table=table)

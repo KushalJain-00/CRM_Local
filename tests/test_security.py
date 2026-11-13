@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 import config
 import db
 import pipeline
-from app import MASKED_KEY, app
+from app import app
+from api.settings import MASKED_KEY
 from services.eml_processor import ParsedEml, build_llm_prompt
 
 client = TestClient(app)
@@ -134,8 +135,20 @@ def test_size_cap_marks_error_and_excludes(data_dir, tmp_path):
     big.write_bytes(b"x" * (11 * 1024 * 1024))  # > MAX_SCAN_SIZE (10MB)
     (eml_dir / "ok.eml").write_text("Subject: hi\n\nbody\n", "utf-8")
 
+    # Read-only pending lists everything; the extraction core rejects the
+    # oversized file and marks the ledger error (one cap, one place).
     pending = pipeline._pending(str(eml_dir), "eml", pipeline.EML_EXTS)
-    assert pending == [str(eml_dir / "ok.eml")]
+    assert set(pending) == {str(big), str(eml_dir / "ok.eml")}
+
+    import asyncio
+    from services.extract import process_source
+    con = db.connect("crm")
+    try:
+        outcome = asyncio.run(process_source(con, str(big), chain=[], cfg=config.load()))
+        con.commit()
+    finally:
+        con.close()
+    assert outcome.status == "ERROR"
 
     con = db.connect("eml")
     try:
@@ -144,7 +157,11 @@ def test_size_cap_marks_error_and_excludes(data_dir, tmp_path):
     finally:
         con.close()
     assert row is not None and row[0] == "error"
-    assert "cap" in (row[1] or "")
+    assert "too large" in (row[1] or "")
+
+    # Oversized file no longer pending; ok.eml handled normally by the scan.
+    pending = pipeline._pending(str(eml_dir), "eml", pipeline.EML_EXTS)
+    assert pending == [str(eml_dir / "ok.eml")]
 
 
 def test_depth_cap_prunes_deep_trees(data_dir, tmp_path, monkeypatch):

@@ -3,15 +3,13 @@
 # (EXACT/PROBABLE/CONFLICT/UNIQUE). It never decides a merge.
 from difflib import SequenceMatcher
 
-# re-exported for callers/tests of the public engine API (single implementation)
 from services.keys import (
-    normalize_email, phone_key, name_key, company_key, website_key,
+    normalize_email, phone_key, name_key, company_key,
 )
 
 __all__ = [
     "EXACT_DUPLICATE", "PROBABLE_DUPLICATE", "UNIQUE", "CONFLICT",
-    "normalize_email", "phone_key", "name_key",
-    "company_key", "website_key", "email_key", "compare", "find_matches",
+    "email_key", "compare", "find_matches",
 ]
 
 EXACT_DUPLICATE = "EXACT_DUPLICATE"

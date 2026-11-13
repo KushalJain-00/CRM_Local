@@ -1951,12 +1951,10 @@ function renderPrompts() {
 }
 
 async function loadPrompts() {
-    const [contact, eml] = await Promise.all([
-        api('/api/prompts/contact'),
-        api('/api/prompts/eml'),
-    ]);
-    promptsWorking.contact = contact;
-    promptsWorking.eml = eml;
+    const kinds = ['contact', 'eml'];
+    const details = await Promise.all(kinds.map(kind => api(`/api/prompts/${kind}`)));
+    promptsWorking.contact = details[0];
+    promptsWorking.eml = details[1];
     renderPrompts();
 }
 

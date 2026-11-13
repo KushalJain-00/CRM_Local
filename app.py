@@ -3,7 +3,6 @@ import asyncio
 import os
 import subprocess
 import sys
-import uuid
 from urllib.parse import urlsplit
 
 # Windowed PyInstaller exe: no console → std streams are None, which crashes
@@ -72,9 +71,6 @@ async def security_headers(request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
 
-class ScanIn(BaseModel):
-    which: str = "all"
-
 class ConfigIn(BaseModel):
     crm_dir: str | None = None
     eml_dir: str | None = None
@@ -85,61 +81,6 @@ class ConfigIn(BaseModel):
 
 class FolderIn(BaseModel):
     initial: str = ""
-
-# SEC-01 / D-028a: key material never leaves the server on any config or
-# settings response (GET *and* POST echo). Reads return each chain credential
-# with a stable `id`, `api_key_set` (bool) and `api_key` replaced by
-# MASKED_KEY. Writes are only-set-on-change: "", absent or MASKED_KEY keeps
-# the stored key; any other value replaces it. Credentials omitted from a
-# write payload are deleted (per-credential delete); unknown ids are created
-# as given. (Contract: docs/SECURITY_REVIEW.md SEC-01 + D-028a; the Phase-2
-# chain-absence from INTERFACE_CONTRACTS §4.12 lands with /api/providers.)
-MASKED_KEY = "********"
-
-def _mask_chain(chain: list | None) -> list:
-    masked = []
-    for i, entry in enumerate(chain or []):
-        if not isinstance(entry, dict):
-            continue
-        e = dict(entry)
-        has_key = bool(e.get("api_key"))
-        e["id"] = str(e["id"]) if e.get("id") is not None else str(i)
-        e["api_key_set"] = has_key
-        e["api_key"] = MASKED_KEY if has_key else ""
-        masked.append(e)
-    return masked
-
-def _mask_cfg(cfg: dict) -> dict:
-    out = dict(cfg)
-    out["chain"] = _mask_chain(out.get("chain"))
-    return out
-
-def _merge_chain(incoming: list | None, stored: list | None) -> list:
-    stored = [e for e in (stored or []) if isinstance(e, dict)]
-    for i, entry in enumerate(stored):
-        if entry.get("id") is None:
-            # Legacy entries: positional id, same convention as the read side,
-            # so a GET→POST round-trip of an old config matches credentials.
-            entry["id"] = str(i)
-    by_id = {str(e["id"]): e for e in stored}
-    merged = []
-    for i, entry in enumerate(incoming or []):
-        if not isinstance(entry, dict):
-            raise HTTPException(422, "chain entries must be objects")
-        e = dict(entry)
-        key = e.get("api_key")
-        if key is None:
-            key = ""
-        if not isinstance(key, str):
-            raise HTTPException(422, "api_key must be a string")
-        eid = str(e["id"]) if e.get("id") is not None else None
-        old = by_id.get(eid) if eid is not None else (stored[i] if i < len(stored) else None)
-        if key in ("", MASKED_KEY):
-            e["api_key"] = (old or {}).get("api_key", "")
-        e.pop("api_key_set", None)  # derived flag, recomputed on read
-        e["id"] = eid if eid is not None else ((old or {}).get("id") or uuid.uuid4().hex[:8])
-        merged.append(e)
-    return merged
 
 # SEC-09 (D-028c): force config.json to 0600 at startup is now handled by the
 # lifespan context manager below, which guarantees db.init() runs before the first

@@ -7,8 +7,7 @@ NEEDS_REVIEW; nothing is dropped silently, nothing is invented.
 """
 import os, re
 from . import NormalizedContact, ExtractionResult
-
-_EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}")
+from services.keys import EMAIL_RE as _EMAIL_RE
 # Loose candidate; digit count is validated after extraction (7–15 digits).
 _PHONE_CAND = re.compile(r"(?:\+\d{1,3}[\s\-.()/]*)?(?:\(?\d[\s\-.()/]*){7,14}\d")
 _NAME_HINT = re.compile(r"\b(?:mr|mrs|ms|dr)\.?\s+", re.I)
@@ -40,6 +39,7 @@ def _name_from_line(line: str) -> str | None:
 
 class TxtAdapter:
     name = "txt"
+    MAX_TABLE_LINES = 500  # AI-assist table is capped; deterministic path is unaffected
 
     def can_handle(self, file_path: str) -> bool:
         return file_path.lower().endswith(".txt")
@@ -70,6 +70,16 @@ class TxtAdapter:
                                   if v},
                 )
                 contacts.append(nc)
-            return ExtractionResult(contacts=contacts, adapter="txt", local_only=True)
+            warnings = []
+            if len(lines) > self.MAX_TABLE_LINES:
+                warnings.append(f"file has {len(lines)} lines; AI assist sees the first {self.MAX_TABLE_LINES}")
+            table = {
+                "sheet": os.path.basename(file_path),
+                "headers": ["line"],
+                "rows": [{"_row": i + 1, "_sheet": "TXT", "line": ln.rstrip("\n")}
+                         for i, ln in enumerate(lines[:self.MAX_TABLE_LINES]) if ln.strip()],
+            }
+            return ExtractionResult(contacts=contacts, warnings=warnings,
+                                    adapter="txt", local_only=True, table=table)
         except Exception as e:
             return ExtractionResult(contacts=[], warnings=[str(e)], adapter="txt", local_only=True)

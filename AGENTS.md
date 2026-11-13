@@ -22,7 +22,7 @@ Recent critical decisions (2026-11-07):
 | **WCAG 2.2 AA compliance** | Brief §17 | Frontend standards; accessibility audit |
 | **One SQLite database only** | Architecture constraint | `db.py:_UNIFIED_DB = "crm.db"` |
 | **LLM output validated against contract** | Data integrity | `services/contract.py:validate_extraction_result()` |
-| **Dedup keys use shared normalizers** | Consistency | `services/eml_dedup_rules.py` or `services/dedup.py` |
+| **Dedup keys use shared normalizers** | Consistency | `services/keys.py` |
 | **Header byte caps are SEC-10** | Security | `services/eml_processor.py` + mirror to CRM_Developer |
 | **config.json perms: 0600 on POSIX** | Secrets protection | `config.py:_private()` + `lock_down()` |
 | **config.json never exposed to browser JS** | Secrets leak (D-011) | `api/settings.py` masks all keys; `/api/config` retired |
@@ -46,7 +46,7 @@ For every code change:
 - [ ] **No api_key leakage**: Search your diff for any raw `api_key` strings; ensure they go through `_mask_chain()`
 - [ ] **DB changes gated**: If touching migrations, remember `CRM_APPLY_MIGRATIONS=1` requirement
 - [ ] **API contracts**: If adding/removing routes, check `INTERFACE_CONTRACTS.md` §2.1
-- [ ] **Dedup key consistency**: If adding new dedup logic, use shared normalizers from `services/eml_dedup_rules.py`
+- [ ] **Dedup key consistency**: If adding new dedup logic, use shared normalizers from `services/keys.py`
 - [ ] **Prompt format**: If modifying extraction prompts, follow `build_prompt()` pattern from `services/prompts/contact_extraction.py`
 - [ ] **Header caps**: If modifying `services/eml_processor.py`, mirror byte-for-byte to CRM_Developer
 - [ ] **No new charts**: Verify no `chart-*` ids or Canvas/Plotly/D3 additions
@@ -141,7 +141,7 @@ Follow the pattern in `services/adapters/`:
 | **Applying migrations on startup** | Remember `CRM_APPLY_MIGRATIONS=1` gate; `db.py` enforces it |
 | **New chart/graph component** | Brief hard constraint — use tables/status badges instead |
 | **LLM emitting DB-owned fields** | `validate_extraction_result()` checks BANNED_DB_KEYS |
-| **Dedup keys computed differently** | Use shared normalizers from `services/eml_dedup_rules.py` |
+| **Dedup keys computed differently** | Use shared normalizers from `services/keys.py` |
 | **`config.json` not 0600 on POSIX** | `config.lock_down()` called at app startup (`app.py:163`) |
 | **`/api/config` still in code** | Retired per D-011 — use `/api/settings` only |
 | **Origin validation bypassed** | Loopback middleware in `app.py:42-63` — foreign Origins always rejected |

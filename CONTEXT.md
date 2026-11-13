@@ -139,7 +139,7 @@ Single shared JSON contract embedded in every extraction request. Validated by `
 /services/        — Core extraction logic
   /adapters/      — Per-format extractors (xlsx, csv, pdf, txt, eml)
   /dedup.py       — Duplicate detection engine (report only, no merge decisions)
-  /eml_dedup_rules.py — Shared dedup normalizers (normalize_email, phone_key)
+  /keys.py — Shared identity-key normalizers (normalize_email, phone_key, name_key, …)
   /eml_processor.py — EML parsing (MIME, signature, field extraction)
   /contract.py    — Extraction result validation against crm-extraction.v1
   /prompts/       — Master system prompt + contract JSON (+ 5 source extensions)
@@ -181,7 +181,7 @@ Recent critical decisions (2026-11-07):
 2. **Never apply migrations on app startup** — `CRM_APPLY_MIGRATIONS=1` gate is enforced; app startups must NOT restructure production data
 3. **API keys must never appear in logs, responses, or debug output** — masked per D-011 / SEC-01
 4. **All extraction output validated against crm-extraction.v1 contract** — use `validate_extraction_result()` from `services/contract.py`
-5. **Dedup keys must use shared normalizers** — `name_key()`, `company_key()`, `website_key()`, `email_key()` from `services/eml_dedup_rules.py` or `services/dedup.py`
+5. **Dedup keys must use shared normalizers** — `name_key()`, `company_key()`, `website_key()`, `email_key()` from `services/keys.py`
 6. **LLM prompts must follow build_prompt() pattern** — master prompt + source extension + contract + delimited untrusted content
 7. **Header byte caps are SEC-10** — mirror byte-for-byte to CRM_Developer if modifying `services/eml_processor.py`
 8. **Config.json perms: 0600 on POSIX** — `config._private()` + `config.lock_down()`

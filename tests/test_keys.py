@@ -1,7 +1,7 @@
 # tests/test_keys.py — the one identity-key implementation, pinned hard.
 import pytest
 
-from services.keys import normalize_email, normalize_phone, phone_key, name_key, company_key, website_key, normalize_name, record_keys, identity_key, is_duplicate
+from services.keys import normalize_email, phone_key, name_key, company_key, website_key, normalize_name, record_keys, identity_key, is_duplicate
 from services import dedup, staging
 
 class TestEmail:
@@ -27,8 +27,6 @@ class TestPhone:
     def test_too_short_or_missing_is_none(self, raw):
         assert phone_key(raw) is None
 
-    def test_normalize_phone_keeps_all_digits(self):
-        assert normalize_phone("+91 (22) 1234-5678") == "912212345678"
 
 class TestNameKey:
     @pytest.mark.parametrize("raw", [

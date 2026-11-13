@@ -1,3 +1,4 @@
+from services.keys import EMAIL_RE
 # parse.py — turn a CRM file into rows, then map columns to contact fields.
 import csv
 import io
@@ -6,8 +7,6 @@ import re
 import openpyxl
 
 from services import parser as legacy
-
-EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}")
 
 CONTACT_FIELDS = [
     "name", "email_primary", "email_secondary", "phone_primary", "phone_secondary",

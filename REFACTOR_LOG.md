@@ -222,3 +222,44 @@ lists unchanged (audit identical modulo API-URL listing: '/api/prompts' →
   wrong cwd serving the user's uncommitted WIP app.js) — resolved by
   restarting from this worktree; no defect was in the refactored code.
 - Suite: **404 passed, 1 xfailed** (frontend changes don't touch tests).
+
+## D-U6 (Phase 6 re-audit, done): first re-audit round — fixes
+
+Subagent re-audit (backend) findings, fixed here; second round expected.
+
+- **Approval seam keys (D-U1 enforcement)**: `_enrich_existing` now
+  recomputes name_key/phone_key/company_key/website_key for every canonical
+  field it fills (previously NULL keys forever); staged PATCH
+  (`_apply_field_edits`) recomputes the staged row's keys for key-bearing
+  fields it writes.
+- **Merge is no longer a second approval path**: `/staged-contacts/{id}/merge`
+  shares `_find_contact_by_identity` (email lower+phone_key fallback, same
+  as approve) — previously email-only match, diverging from approve.
+- **AI assist for documents**: adapters stash the parsed table on
+  ExtractionResult (like .eml stashes `parsed`); the core no longer re-reads
+  and re-parses xlsx/xls/pdf (and .txt gets AI assist for the first 500
+  lines instead of silently getting none). The duplicate `contract_to_normalized`
+  converter was deleted — one conversion boundary (`ai_contacts_to_staged`,
+  pinned by chunking tests) + a direct kwarg spread into NormalizedContact.
+- **Read-path ledger mutation removed**: `_pending()` no longer writes
+  `processed_files` (status polls hit it). Oversized files are rejected by
+  the extraction core (error ledger row) and drop out of pending after the
+  scan — one cap, one place. test_security's size-cap test updated to the
+  new contract (still asserts the ledger error row).
+- **EML sort**: `_pending()` filters by is_processed BEFORE parsing Date
+  headers — processed emails are never re-parsed just to sort them.
+- **Migration consistency**: `_migrate_eml_data` recomputes email_key/
+  phone_key instead of copying legacy verbatim; v4 backfill recomputes
+  phone_key instead of legacy-first precedence.
+- **Dead masking in app.py**: MASKED_KEY/_mask_chain/_mask_cfg/_merge_chain
+  (all duplicated in api/settings.py, no callers) and unused ScanIn deleted;
+  test_security imports MASKED_KEY from api.settings now.
+- **Email regex unified**: keys.EMAIL_RE is the one regex; parse.py,
+  eml_processor.py, parser.py, txt.py share it (parser's ASCII variant kept —
+  deliberately different).
+- **keys.py**: normalize_phone → private `_digits_only` (only is_duplicate
+  uses it); dedup.py no longer re-exports keys (test-driven re-export
+  removed); test_dedup imports keys directly.
+- **AGENTS.md/CONTEXT.md** module references updated (eml_dedup_rules → keys.py).
+- Suite: **401 passed, 1 xfailed**. contract_audit: identical (MISSING IDS
+  subset is the no-charts rule, unchanged).

@@ -262,7 +262,8 @@ def _migrate_eml_data(con: sqlite3.Connection) -> None:
                     r["phone_secondary"], r["company"], r["designation"],
                     r["address"], r["city"], r["pincode"], r["website"],
                     "NEW", r["pushed"] if "pushed" in r.keys() else 0, r["source_file"],
-                    r["email_key"], r["phone_key"], r["created_at"], r["updated_at"],
+                    normalize_email(r["email_primary"]) or None,
+                    phone_key(r["phone_primary"]), r["created_at"], r["updated_at"],
                 ))
         except Exception as e:
             pass
@@ -503,7 +504,7 @@ def _mig_v4_backfill_staged(con: sqlite3.Connection) -> None:
             d.get("address"), d.get("city"), d.get("pincode"), d.get("website"),
             d.get("to_emails"), d.get("cc_emails"), d.get("bcc_emails"),
             normalize_email(d.get("email")) or None,
-            d.get("phone_key") or phone_key(d.get("phone_primary")),
+            phone_key(d.get("phone_primary")),
             name_key(d.get("name")), company_key(d.get("company")), website_key(d.get("website")),
             json.dumps(d, ensure_ascii=False, default=str),
             d.get("field_origin"),
