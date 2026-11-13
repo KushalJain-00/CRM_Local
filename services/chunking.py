@@ -5,8 +5,7 @@
 import json
 import re
 
-from services.eml_dedup_rules import normalize_email, phone_key
-from services.dedup import name_key, company_key
+from services.keys import identity_key
 from services.prompts.contact_extraction import (
     EXTRACTION_CONTRACT, MAX_CONTENT_CHARS, MAX_HEADER_CHARS,
     MAX_HEADER_KEY_CHARS, _sanitize_header,
@@ -74,14 +73,6 @@ def build_doc_chunks(table: dict, *, source_type: str = "spreadsheet",
     ]
 
 
-def _identity_keys(c: dict) -> tuple:
-    return (("e", normalize_email(c.get("email_primary") or c.get("email")) or None)
-            if normalize_email(c.get("email_primary") or c.get("email"))
-            else ("p", phone_key(c.get("phone_primary")) or None)
-            if phone_key(c.get("phone_primary"))
-            else ("n", name_key(c.get("name")), company_key(c.get("company_name") or c.get("company"))))
-
-
 def merge_extraction(results: list[dict]) -> dict:
     """Merge validated crm-extraction.v1 payloads (one per chunk).
 
@@ -100,7 +91,7 @@ def merge_extraction(results: list[dict]) -> dict:
         if res.get("source_type"):
             merged["source_type"] = res["source_type"]
         for c in res.get("contacts") or []:
-            k = _identity_keys(c)
+            k = identity_key(c)
             if k == ("n", None, None):
                 k = ("u", idx, len(merged["contacts"]))  # unidentifiable: keep all
             existing = by_key.get(k)

@@ -6,11 +6,11 @@ import json
 import logging
 import math
 import sqlite3
-import re
 from datetime import datetime
 import config as _config
-from services.eml_dedup_rules import normalize_email, phone_key
-from services.dedup import name_key, company_key, website_key
+from services.keys import (
+    normalize_email, phone_key, normalize_name, record_keys,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -165,14 +165,9 @@ _CONTACT_FIELD_MAP = {
 
 
 def _canon_keys(sc) -> dict:
-    """Dedup keys for a new canonical contact; stored keys win, recompute as fallback."""
-    return {
-        "email_key": sc["email_key"] or normalize_email(sc["email"]) or None,
-        "phone_key": sc["phone_key"] or phone_key(sc["phone_primary"]) or None,
-        "name_key": sc["name_key"] or name_key(sc["name"]) or None,
-        "company_key": sc["company_key"] or company_key(sc["company"]) or None,
-        "website_key": sc["website_key"] or website_key(sc["website"]) or None,
-    }
+    """Dedup keys for a new canonical contact, always from the authoritative
+    normalizers — identical to what staged rows were written with."""
+    return record_keys(dict(sc))
 
 
 def _enrich_existing(con, existing_id: int, sc) -> None:
@@ -225,13 +220,8 @@ def _approve_ids(con, staged_ids: List[int]) -> dict:
         if sc["review_status"] == "APPROVED":
             already += 1  # replay-safe: never double-commit
             continue
-        email = (sc["email"] or "").strip().lower() or None
-        phone_digits = re.sub(r"\D", "", (sc["phone_primary"] or ""))
-        if len(phone_digits) == 12 and phone_digits.startswith("91"):
-            phone_digits = phone_digits[2:]
-        elif len(phone_digits) == 11 and phone_digits.startswith("0"):
-            phone_digits = phone_digits[1:]
-        phone_digits = phone_digits if len(phone_digits) >= 7 else None
+        email = normalize_email(sc["email"]) or None
+        phone_digits = phone_key(sc["phone_primary"])
         existing = None
         if email:
             existing = con.execute(
@@ -481,7 +471,7 @@ async def check_staged_dedup(
 
         # Normalize email
         if email:
-            er = (email or "").strip().lower()
+            er = normalize_email(email)
             if er:
                 result = con.execute(
                     "SELECT id FROM contacts WHERE email_key = ?", (er,)
@@ -491,12 +481,8 @@ async def check_staged_dedup(
 
         # Normalize phone
         if phone:
-            d = re.sub(r"\D", "", phone or "")
-            if len(d) == 12 and d.startswith("91"):
-                d = d[2:]
-            if len(d) == 11 and d.startswith("0"):
-                d = d[1:]
-            if len(d) >= 7:
+            d = phone_key(phone)
+            if d:
                 result = con.execute(
                     "SELECT id FROM contacts WHERE phone_key = ?", (d,)
                 ).fetchone()
@@ -506,13 +492,9 @@ async def check_staged_dedup(
 
         # Check name + phone
         if name and phone:
-            nk = (name or "").strip().lower().replace("  ", " ")
-            d = re.sub(r"\D", "", phone or "")
-            if len(d) == 12 and d.startswith("91"):
-                d = d[2:]
-            if len(d) == 11 and d.startswith("0"):
-                d = d[1:]
-            if len(d) >= 7:
+            nk = normalize_name(name)
+            d = phone_key(phone)
+            if d:
                 result = con.execute(
                     "SELECT id FROM contacts WHERE name LIKE ? AND phone_key = ?",
                     (f"%{nk}%", d)
@@ -522,7 +504,7 @@ async def check_staged_dedup(
 
         # Check within staged contacts (email)
         if email:
-            er = (email or "").strip().lower()
+            er = normalize_email(email)
             if er:
                 result = con.execute(
                     "SELECT COUNT(*) FROM staged_contacts WHERE email = ?", (er,)
@@ -533,8 +515,8 @@ async def check_staged_dedup(
 
         # Check within staged contacts (phone)
         if phone:
-            d = re.sub(r"\D", "", phone or "")
-            if len(d) >= 7:
+            d = phone_key(phone)
+            if d:
                 result = con.execute(
                     "SELECT COUNT(*) FROM staged_contacts WHERE phone_primary LIKE ?",
                     (f"%{d}%",)

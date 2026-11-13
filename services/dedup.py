@@ -1,59 +1,29 @@
-# services/dedup.py
-"""Shared pure-function dedup engine (spec §6/§8).
-
-Phase 1: normalization + match reporting only. No DB coupling — Phase 2
-wires the queries and approval/merge policy. This engine REPORTS matches;
-it never decides a merge (the EXACT/PROBABLE/CONFLICT bands feed a human
-or a Phase-2 policy gate).
-"""
-import re
+# services/dedup.py — band-comparison engine (spec §6/§8).
+# Keys come from services/keys.py; this module only REPORTS match bands
+# (EXACT/PROBABLE/CONFLICT/UNIQUE). It never decides a merge.
 from difflib import SequenceMatcher
 
-from services.eml_dedup_rules import normalize_email, phone_key  # shared core (G14)
+from services.keys import (  # re-exported for callers/tests of the public engine API
+    normalize_email, normalize_phone, phone_key, name_key, company_key,
+    website_key,
+)
+
+__all__ = [
+    "EXACT_DUPLICATE", "PROBABLE_DUPLICATE", "UNIQUE", "CONFLICT",
+    "normalize_email", "normalize_phone", "phone_key", "name_key",
+    "company_key", "website_key", "email_key", "compare", "find_matches",
+]
 
 EXACT_DUPLICATE = "EXACT_DUPLICATE"
 PROBABLE_DUPLICATE = "PROBABLE_DUPLICATE"
 UNIQUE = "UNIQUE"
 CONFLICT = "CONFLICT"
 
-_HONORIFIC_RE = re.compile(r"^(?:mr|mrs|ms|dr|prof|shri|smt)\.?\s+")
-_LEGAL_TOKENS = frozenset({
-    "pvt", "private", "ltd", "limited", "llp", "inc", "corp", "corporation",
-    "co", "company", "gmbh", "plc", "srl", "pte", "the",
-})
 _FUZZY_THRESHOLD = 0.85
 
 
 def email_key(value) -> str | None:
-    key = normalize_email(value)
-    return key or None
-
-
-def name_key(value) -> str | None:
-    text = _as_text(value).strip().lower()
-    text = _HONORIFIC_RE.sub("", text)
-    text = re.sub(r"[.,'\"`\-]+", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text or None
-
-
-def company_key(value) -> str | None:
-    text = _as_text(value).strip().lower()
-    text = re.sub(r"[.,'\"&]+", " ", text)
-    tokens = [t for t in text.split() if t not in _LEGAL_TOKENS]
-    return " ".join(tokens) or None
-
-
-def website_key(value) -> str | None:
-    text = _as_text(value).strip().lower()
-    text = re.sub(r"^https?://", "", text)
-    text = re.sub(r"^www\.", "", text)
-    text = text.split("/")[0].strip(".")
-    return text or None
-
-
-def _as_text(value) -> str:
-    return value if isinstance(value, str) else str(value if value is not None else "")
+    return normalize_email(value) or None
 
 
 def _email_of(record: dict) -> str | None:
@@ -69,7 +39,6 @@ def _company_of(record: dict) -> str | None:
 
 
 def _phone_overlap(a: str, b: str) -> bool:
-    # Containment retained from db.DedupIndex for +91/landline variance.
     return a == b or (len(a) >= 10 and len(b) >= 10 and (a in b or b in a))
 
 

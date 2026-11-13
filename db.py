@@ -10,6 +10,9 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import config
+from services.keys import (
+    name_key, company_key, website_key, phone_key, normalize_email,
+)
 
 # Unified database: single file for all CRM + EML data (D-014)
 _UNIFIED_DB = "crm.db"
@@ -323,25 +326,7 @@ def _con_db_file(con: sqlite3.Connection) -> str:
     return os.path.realpath(row[2]) if row and row[2] else ""
 
 
-# Dedup keys per docs/STAGED_CONTACT_ARCHITECTURE.md §6.5:
-#   name_key/company_key = lower(collapse_ws(v))  (eml_dedup_rules.normalize_name)
-#   website_key = host, lower, no scheme/'www'/path
-def name_key(value) -> str | None:
-    k = re.sub(r"\s+", " ", (value or "").strip().lower()).strip()
-    return k or None
-
-
-def website_key(website: str | None) -> str | None:
-    w = (website or "").strip().lower()
-    if not w:
-        return None
-    if "://" in w:
-        w = w.split("://", 1)[1]
-    w = w.split("/")[0].split("?")[0].split(":")[0].strip(". ")
-    if w.startswith("www."):
-        w = w[4:]
-    return w.strip(".") or None
-
+# Identity keys live in services/keys.py — single implementation.
 
 # §4.3 target DDL. Deviations from the doc, per D-030 task spec:
 #  · source_type CHECK is LOWERCASE ('xlsx',…,'eml') — Phase-2 §4.2 view must match;
@@ -538,7 +523,7 @@ def _mig_v4_backfill_staged(con: sqlite3.Connection) -> None:
             d.get("to_emails"), d.get("cc_emails"), d.get("bcc_emails"),
             normalize_email(d.get("email")) or None,
             d.get("phone_key") or phone_key(d.get("phone_primary")),
-            name_key(d.get("name")), name_key(d.get("company")), website_key(d.get("website")),
+            name_key(d.get("name")), company_key(d.get("company")), website_key(d.get("website")),
             json.dumps(d, ensure_ascii=False, default=str),
             d.get("field_origin"),
             crm_id if crm_id in contact_ids else None,
@@ -637,7 +622,7 @@ def _mig_v6_rebuild_contacts(con: sqlite3.Connection) -> None:
     ).fetchall():
         con.execute(
             "UPDATE contacts_new SET name_key = ?, company_key = ?, website_key = ? WHERE id = ?",
-            (name_key(r[1]), name_key(r[2]), website_key(r[3]), r[0]),
+            (name_key(r[1]), company_key(r[2]), website_key(r[3]), r[0]),
         )
 
     new_count = con.execute("SELECT COUNT(*) FROM contacts_new").fetchone()[0]
@@ -895,17 +880,6 @@ def connect(which: str = "crm") -> sqlite3.Connection:
     return con
 
 
-# Phone normalization (shared, G14)
-def phone_key(phone: str | None) -> str | None:
-    """Digits only, with Indian country-code / trunk-prefix variance removed."""
-    d = re.sub(r"\D", "", phone or "")
-    if len(d) == 12 and d.startswith("91"):
-        d = d[2:]
-    if len(d) == 11 and d.startswith("0"):
-        d = d[1:]
-    return d if len(d) >= 7 else None
-
-
 # Keep original functions that other modules depend on
 # (upsert_contact, insert_email, insert_eml_contact, mark_pushed, list_contacts, etc.)
 # These are in the original db.py — import them from here for backward compat
@@ -932,10 +906,6 @@ def connect(which: str = "crm") -> sqlite3.Connection:
 
 # Import original helper functions by exec'ing the old db.py logic
 # (We'll keep them inline for simplicity)
-
-def normalize_email(email: str | None) -> str:
-    return (email or "").strip().lower()
-
 
 class DedupIndex:
     def __init__(self):

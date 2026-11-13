@@ -8,8 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 import config as _config
-from services.eml_dedup_rules import normalize_email, phone_key
-from services.dedup import name_key, company_key, website_key
+from services.keys import record_keys
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -116,21 +115,12 @@ async def update_contact(contact_id: int, body: ContactFieldsIn):
             sets.append(f"{key} = ?")
             vals.append(val)
         contact_cols = {r[1] for r in con.execute("PRAGMA table_info(contacts)").fetchall()}
-        if "email_primary" in fields and "email_key" in contact_cols:
-            sets.append("email_key = ?")
-            vals.append(normalize_email(fields["email_primary"]) or None)
-        if "phone_primary" in fields and "phone_key" in contact_cols:
-            sets.append("phone_key = ?")
-            vals.append(phone_key(fields["phone_primary"]))
-        if "name" in contact_cols and "name_key" in contact_cols and "name" in fields:
-            sets.append("name_key = ?")
-            vals.append(name_key(fields["name"]))
-        if "company" in contact_cols and "company_key" in contact_cols and "company" in fields:
-            sets.append("company_key = ?")
-            vals.append(company_key(fields["company"]))
-        if "website" in contact_cols and "website_key" in contact_cols and "website" in fields:
-            sets.append("website_key = ?")
-            vals.append(website_key(fields["website"]))
+        keys = record_keys(fields)
+        for source, col in (("email_primary", "email_key"), ("phone_primary", "phone_key"),
+                            ("name", "name_key"), ("company", "company_key"), ("website", "website_key")):
+            if source in fields and col in contact_cols:
+                sets.append(f"{col} = ?")
+                vals.append(keys[col])
         vals.append(contact_id)
         con.execute(f"UPDATE contacts SET {', '.join(sets)} WHERE id = ?", vals)
         con.commit()

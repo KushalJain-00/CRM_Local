@@ -1,5 +1,7 @@
 import db
 
+from services.keys import phone_key
+
 
 def test_upsert_enriches_without_overwriting(data_dir):
     con = db.connect("crm")
@@ -23,9 +25,9 @@ def test_upsert_enriches_without_overwriting(data_dir):
 
 
 def test_phone_key_collapses_indian_prefixes():
-    assert db.phone_key("+91 98765 43210") == "9876543210"
-    assert db.phone_key("09876543210") == "9876543210"
-    assert db.phone_key("9876543210") == "9876543210"
+    assert phone_key("+91 98765 43210") == "9876543210"
+    assert phone_key("09876543210") == "9876543210"
+    assert phone_key("9876543210") == "9876543210"
 
 
 def test_dedup_index_matches_email_phone_and_name(data_dir):

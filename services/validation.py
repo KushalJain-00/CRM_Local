@@ -7,7 +7,7 @@ flagged values stay in the record and in raw_source_data.
 """
 import re
 
-from services.eml_dedup_rules import normalize_email, phone_key
+from services.keys import normalize_email, phone_key
 
 # Exact issue categories (spec §5.2 / brief §7).
 SEVERITY = {

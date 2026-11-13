@@ -1,7 +1,7 @@
 """Tests for Phase 1 dedup comparison layer (services/dedup)."""
 
 from services import dedup
-from services.eml_dedup_rules import normalize_email, phone_key
+from services.keys import normalize_email, phone_key
 
 
 class TestReuseSharedCore:

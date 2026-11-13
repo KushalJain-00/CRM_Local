@@ -5,27 +5,16 @@ import json
 from datetime import datetime, timezone
 
 from services import validation, dedup
-from services.eml_dedup_rules import normalize_email, phone_key
-from services.dedup import name_key, company_key, website_key
+from services.keys import record_keys, identity_key
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _keys(d: dict) -> dict:
-    return {
-        "email_key": normalize_email(d.get("email_primary") or d.get("email")) or None,
-        "phone_key": phone_key(d.get("phone_primary")) or None,
-        "name_key": name_key(d.get("name")),
-        "company_key": company_key(d.get("company")),
-        "website_key": website_key(d.get("website")),
-    }
-
-
 def _dedup_vs_canonical(con, d: dict) -> tuple[str, list[int]]:
     """Band the staged record against canonical contacts. Human decides; we report."""
-    keys = _keys(d)
+    keys = record_keys(d)
     cands: list[int] = []
     try:
         if keys["email_key"]:
@@ -80,10 +69,8 @@ def stage_contacts(con, contacts: list[dict], *, source_type: str, source_file: 
     for nc in contacts:
         d = dict(nc)
         d.setdefault("email_primary", d.get("email"))
-        keys = _keys(d)
-        batch_key = (("e", keys["email_key"]) if keys["email_key"]
-                     else ("p", keys["phone_key"]) if keys["phone_key"]
-                     else ("n", keys["name_key"], keys["company_key"]))
+        keys = record_keys(d)
+        batch_key = identity_key(d)
         if batch_key != ("n", None, None):
             if batch_key in seen_keys:
                 counts["batch_duplicates"] += 1
