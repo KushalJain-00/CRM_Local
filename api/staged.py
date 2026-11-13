@@ -159,7 +159,6 @@ def _enrich_existing(con, existing_id: int, sc) -> None:
 
     Key-bearing columns are recomputed after filling so canonical rows never
     carry NULL keys for populated values."""
-    changed = set()
     for staged_col, canon_col in _CONTACT_FIELD_MAP.items():
         val = sc[staged_col] if staged_col in sc.keys() else None
         if val is None:
@@ -168,17 +167,17 @@ def _enrich_existing(con, existing_id: int, sc) -> None:
             f"SELECT {canon_col} FROM contacts WHERE id = ?", (existing_id,)).fetchone()[0]
         if existing_val == "" or existing_val is None:
             con.execute(f"UPDATE contacts SET {canon_col} = ? WHERE id = ?", (val, existing_id))
-            changed.add(canon_col)
-    key_cols = changed & set(_KEY_BY_FIELD)
-    if key_cols:
-        row = con.execute(
-            "SELECT name, phone_primary, company, website FROM contacts WHERE id = ?",
-            (existing_id,)).fetchone()
-        keys = record_keys({"name": row[0], "phone_primary": row[1],
-                            "company": row[2], "website": row[3]})
-        for canon_col in key_cols:
-            con.execute(f"UPDATE contacts SET {_KEY_BY_FIELD[canon_col]} = ? WHERE id = ?",
-                        (keys[_KEY_BY_FIELD[canon_col]], existing_id))
+    # Self-heal: canonical rows never carry NULL keys for populated values.
+    row = con.execute(
+        "SELECT name, phone_primary, company, website FROM contacts WHERE id = ?",
+        (existing_id,)).fetchone()
+    keys = record_keys({"name": row[0], "phone_primary": row[1],
+                        "company": row[2], "website": row[3]})
+    con.execute(
+        "UPDATE contacts SET name_key = ?, phone_key = ?, company_key = ?, website_key = ?"
+        " WHERE id = ?",
+        (keys["name_key"], keys["phone_key"], keys["company_key"], keys["website_key"],
+         existing_id))
 
 def _find_contact_by_identity(con, email, phone):
     """Shared identity lookup for approval/merge. Email matches

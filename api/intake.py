@@ -53,52 +53,33 @@ from intake import universal_intake as _universal_intake
 @router.post("/intake")
 async def universal_intake(
     files: List[UploadFile] = File(None),
-    paths: List[str] = Form(None),
     policy: str = Form("review_first"),
 ):
-    """Universal multipart intake: 6 formats → job.
+    """Universal multipart intake: 6 formats → staged review queue.
 
-    Replaces the path-list body (D-009). Server receives **bytes**, never
-    filesystem paths — closes SEC-05 path-containment hole.
+    Server receives **bytes**, never filesystem paths (SEC-05 / D-009).
     """
-    incoming = files or (paths or [])
+    incoming = files or []
     if not incoming:
         raise HTTPException(400, "No files provided")
     if len(incoming) > MAX_FILES:
         raise HTTPException(400, f"Too many files (max {MAX_FILES})")
 
-    # size caps (per-file from UploadFile.size when known; total below)
+    # size caps (per-file checked in _spool_uploads; total here)
     total_bytes = sum((getattr(f, "size", None) or 0) for f in incoming)
     if total_bytes > MAX_SIZE_TOTAL_MB * 1024 * 1024:
         raise HTTPException(413, f"Payload too large (max {MAX_SIZE_TOTAL_MB} MB)")
 
-    # delegate to intake module
-    # SEC-05 / D-028c: enforce path containment - all file paths must be within
-    # the configured data directory to prevent path traversal attacks.
-    data_dir = Path(config.data_dir()).resolve()
-    for p in (paths or []):
-        # Handle bare filenames (no directory component) by resolving them
-        # relative to the data directory, matching intake.py logic.
-        has_dir = os.path.sep in p or (os.path.altsep and os.path.altsep in p)
-        if not has_dir:
-            p = str(data_dir / p)
-        resolved = Path(p).resolve()
-        if not (str(resolved).startswith(str(data_dir) + os.sep) or str(resolved) == str(data_dir)):
-            raise HTTPException(400, f"path outside allowed data directory: {p}")
-
     # Multipart uploads: spool bytes → path-based pipeline → guaranteed cleanup
-    if files:
-        spooled = None
-        try:
-            spooled, spool_sizes = _spool_uploads(files)
-            spool_total = sum(spool_sizes)
-            if spool_total > MAX_SIZE_TOTAL_MB * 1024 * 1024:
-                raise HTTPException(413, f"Payload too large (max {MAX_SIZE_TOTAL_MB} MB)")
-            result = await _universal_intake(spooled,
-                                             chain=config.load().get("chain", []))
-        finally:
-            if spooled:
-                _unspool(spooled)
-        return result
-    result = await _universal_intake(paths or [], chain=config.load().get("chain", []))
+    spooled = None
+    try:
+        spooled, spool_sizes = _spool_uploads(incoming)
+        spool_total = sum(spool_sizes)
+        if spool_total > MAX_SIZE_TOTAL_MB * 1024 * 1024:
+            raise HTTPException(413, f"Payload too large (max {MAX_SIZE_TOTAL_MB} MB)")
+        result = await _universal_intake(spooled,
+                                         chain=config.load().get("chain", []))
+    finally:
+        if spooled:
+            _unspool(spooled)
     return result

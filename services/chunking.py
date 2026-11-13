@@ -21,13 +21,14 @@ This is chunk {chunk_no} of {total_chunks}. Rows cited with absolute file row nu
 {header_block}"""
 _END = "--- END UNTRUSTED SOURCE CONTENT ---"
 
-def _row_line(i: int, row: dict) -> str:
+def _row_line(fallback: int, row: dict) -> str:
+    row_no = row.get("_row") if isinstance(row, dict) and row.get("_row") else fallback
     cells = ", ".join(
         f"{_sanitize_header(k, MAX_HEADER_KEY_CHARS)}="
         f"{_sanitize_header(v, MAX_HEADER_CHARS)}"
         for k, v in (row.items() if isinstance(row, dict) else [])
         if not str(k).startswith("_") and str(v or "").strip())
-    return f"row {i}: {cells}"
+    return f"row {row_no}: {cells}"
 
 def build_doc_chunks(table: dict, *, source_type: str = "spreadsheet",
                      layer1: dict | None = None,

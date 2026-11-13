@@ -263,3 +263,31 @@ Subagent re-audit (backend) findings, fixed here; second round expected.
 - **AGENTS.md/CONTEXT.md** module references updated (eml_dedup_rules → keys.py).
 - Suite: **401 passed, 1 xfailed**. contract_audit: identical (MISSING IDS
   subset is the no-charts rule, unchanged).
+
+## D-U7 (Phase 6 re-audit, round 2): second round — fixes
+
+Subagent re-audit #2 confirmed round-1 fixes hold. Fixed here:
+- **api/intake.py paths channel deleted** — the `?paths=` form field was a
+  documented dead security hole (INTERFACE_CONTRACTS §2.1: path-list form
+  deleted, SEC-05/D-009): no UI/tests/tools call it; multipart bytes-only is
+  the product contract. Its containment machinery went with it. Tests that
+  pinned the deleted transport were converted to multipart (CSV-adapter and
+  empty-file cases) or to a service-level nonexistence test; the "placeholder"
+  test (asserted silent empty success on a missing file) deleted — its
+  premise is impossible by design now. `test_api_intake_refuses_paths_outside_data_dirs`
+  passes unchanged (400).
+- **services/prompts/build_doc_request.py deleted** — fully unreferenced,
+  pre-refactor dead code duplicating the live chunking path.
+- **Chunking row anchoring**: `_row_line` now cites the adapters' absolute
+  file `_row` (multi-sheet/pdf/csv correct), falling back to enumeration;
+  AI-cited rows are traceable to the file again.
+- **`_enrich_existing` self-heal**: after enrichment the canonical row's
+  name/phone/company/website keys are ALWAYS recomputed from the final row
+  (previously populated-but-keyless legacy rows could stay keyless).
+- `services/parse.py` read_table docstring marks it evaluation-tooling API;
+  adapters own production dispatch.
+- Owner decisions deferred by design (see final report): adapter soft-fail
+  contract (OK+warning vs hard ERROR for corrupt files — kept current),
+  api/jobs.py stub, companies.website_key write-only column, raw_source_data
+  D-017 accepted debt, .txt AI-assist cap.
+- Suite: **400 passed, 1 xfailed**.

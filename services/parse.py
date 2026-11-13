@@ -141,7 +141,10 @@ def parse_csv(content: bytes) -> dict:
 
 
 def read_table(path: str) -> dict:
-    """Dispatch on extension. Returns {sheet, headers, rows:[dict]}."""
+    """Dispatch on extension. Returns {sheet, headers, rows:[dict]}.
+
+    Evaluation tooling uses this; production extraction goes through the
+    adapter registry (services/adapters) which owns the same dispatch."""
     ext = path.rsplit(".", 1)[-1].lower()
     with open(path, "rb") as fh:
         content = fh.read()
