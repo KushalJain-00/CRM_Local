@@ -14,32 +14,22 @@ const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
 // ── State ────────────────────────────────────────────────────────────────────
 const S = {
     currentView: 'overview',
-    page: 1,
-    pageSize: 50,
     contactsPage: 1,
     contactsPageSize: 50,
     emailsPage: 1,
     emailsPageSize: 50,
-    sort: 'id',
-    dir: 'desc',
     contacts: [],
     companies: [],
-    emaills: [],   // legacy key kept for compatibility
     emails: [],
-    extractionRunId: null,
-    fileQueue: [],
     // Staged contact state
     stagedReviewPage: 1,
     stagedPageSize: 20,
-    // Duplicate detection state
-    dedupChecking: false,
     // Added by redesign (additive)
     contactsTotal: 0,
     contactsFiltered: [],
     profileContacts: [],
     emailsTotal: 0,
     historyRows: [],
-    stagedCache: [],
     stagedTotal: 0,
     _kpiPrev: {},
 };
@@ -47,7 +37,9 @@ const S = {
 let fileQueue = [];                    // [{file, status, error, progress, contactsFound}]
 let stagedContactsCache = [];          // populated by loadStagedContacts (fixes old bug: was never filled)
 let settingsWorking = null;            // working copy of settings.chain for editing
+let reliabilityWorking = null;         // working copy of the reliability editor payload
 let settingsDirtyFlag = false;
+const contactsSort = { key: 'id', dir: 'desc' };
 let historySort = { key: 'processed_at', dir: 'desc' };
 let emailsSort = { key: 'date', dir: 'desc' };
 let stagedCursor = -1;                 // keyboard triage row index
@@ -101,6 +93,25 @@ function initials(name) {
     return ((parts[0][0] || '') + (parts[1] ? parts[1][0] : '')).toUpperCase();
 }
 
+// One accessor: staged rows carry `email`, canonical rows `email_primary`.
+// Shared avatar + name/company header for the drawers and profile cards.
+function profileHeaderHTML(c, opts) {
+    opts = opts || {};
+    const name = (c && c.name) || '(no name)';
+    const company = (c && c.company) || 'No company';
+    const wrap = opts.minWidth0 ? '<div style="min-width:0">' : '<div>';
+    const title = opts.title ? ` title="${esc(name)}"` : '';
+    return `
+        <div class="profile-top">
+            <span class="profile-avatar" aria-hidden="true">${esc(initials(name))}</span>
+            ${wrap}<div class="profile-name"${title}>${esc(name)}</div><div class="profile-company">${esc(company)}</div></div>
+        </div>`;
+}
+
+function contactEmail(c) {
+    return (c && (c.email_primary || c.email)) || '';
+}
+
 function debounce(fn, ms) {
     let t = null;
     return function (...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), ms); };
@@ -148,6 +159,10 @@ function emptyStateHTML({ icon = 'i-inbox', title, hint, ctaLabel, ctaFn }) {
         ${hint ? `<p>${esc(hint)}</p>` : ''}
         ${ctaLabel ? `<button type="button" class="btn btn-primary btn-sm" onclick="${ctaFn}">${esc(ctaLabel)}</button>` : ''}
     </div>`;
+}
+
+function tableErrorRow(colspan, title, hint) {
+    return `<tr><td colspan="${colspan}">${emptyStateHTML({ icon: 'i-alert-circle', title, hint })}</td></tr>`;
 }
 
 function skeletonRows(tbodyId, cols, rows) {
@@ -285,8 +300,7 @@ function applyTheme(mode) {
     window.dispatchEvent(new CustomEvent('crm:themechange', { detail: { mode, resolved } }));
 }
 
-// Legacy-compatible: setTheme('light'|'dark'|'system', persist)
-function setTheme(theme, persist) {
+function setTheme(theme) {
     applyTheme(theme);
 }
 
@@ -316,6 +330,27 @@ const VIEW_TITLES = {
     settings: 'Settings',
 };
 
+// One label list + icon map: palette, titles and swapView all derive.
+const VIEW_ICONS = {
+    overview: 'i-dashboard', extract: 'i-upload', staged: 'i-inbox',
+    contacts: 'i-users', emails: 'i-mail', profiles: 'i-contact',
+    analytics: 'i-chart', quality: 'i-shield', history: 'i-history', settings: 'i-settings',
+};
+
+// One dispatch table for view → loader: swapView and refreshData share it.
+const VIEW_LOADERS = {
+    overview: loadOverview,
+    extract: null,          // renderFileQueue is view content, not a fetch
+    staged: loadStagedContacts,
+    contacts: loadContacts,
+    emails: loadEmails,
+    profiles: loadCustomerProfiles,
+    analytics: loadAnalytics,
+    quality: loadDataQuality,
+    history: loadHistory,
+    settings: loadSettings,
+};
+
 function swapView(id) {
     $$('.view').forEach(v => v.classList.remove('active'));
     const v = document.getElementById('view-' + id);
@@ -326,16 +361,8 @@ function swapView(id) {
     document.getElementById('topTitle').textContent = VIEW_TITLES[id] || id;
     S.currentView = id;
     closeMobileSidebar();   // navigating always closes the off-canvas drawer
-    if (id === 'overview') loadOverview();
     if (id === 'extract') renderFileQueue();
-    if (id === 'contacts') loadContacts();
-    if (id === 'staged') loadStagedContacts();
-    if (id === 'emails') loadEmails();
-    if (id === 'profiles') loadCustomerProfiles();
-    if (id === 'analytics') loadAnalytics();
-    if (id === 'quality') loadDataQuality();
-    if (id === 'history') loadHistory();
-    if (id === 'settings') loadSettings();
+    else if (VIEW_LOADERS[id]) VIEW_LOADERS[id]();
     const want = '#/' + id;
     if (location.hash !== want) location.hash = want;
 }
@@ -386,8 +413,13 @@ function closeMobileSidebar() {
     if (b) b.setAttribute('aria-expanded', 'false');
 }
 
+// One hash parse for writer, listener and boot.
+function parseHash() {
+    return location.hash.replace(/^#\/?/, '');
+}
+
 window.addEventListener('hashchange', () => {
-    const hash = location.hash.replace('#/', '').replace('#', '');
+    const hash = parseHash();
     if (hash && hash !== S.currentView) showView(hash);
 });
 
@@ -396,11 +428,7 @@ async function refreshData() {
     setBusy(btn, true);
     try {
         await loadOverview();               // refresh KPIs + staged badge everywhere
-        const loader = {
-            overview: null, extract: null, contacts: loadContacts, staged: loadStagedContacts,
-            emails: loadEmails, profiles: loadCustomerProfiles, analytics: loadAnalytics,
-            quality: loadDataQuality, history: loadHistory, settings: loadSettings,
-        }[S.currentView];
+        const loader = VIEW_LOADERS[S.currentView];
         if (loader) await loader();
     } catch (e) { /* loaders handle their own errors */ }
     finally { setBusy(btn, false); }
@@ -410,52 +438,38 @@ async function refreshData() {
 
 let activeRequests = 0;
 const MAX_CONCURRENT = 6;
+const _waiters = [];                    // queued callers wait for a free slot
 
-async function api(path, opts = {}) {
+async function _acquireSlot() {
+    if (activeRequests < MAX_CONCURRENT) { activeRequests++; return; }
+    await new Promise(resolve => _waiters.push(resolve));
     activeRequests++;
-    if (activeRequests > MAX_CONCURRENT) {
-        activeRequests--;
-        throw new Error('Too many concurrent requests');
-    }
+}
+
+function _releaseSlot() {
+    activeRequests--;
+    const next = _waiters.shift();
+    if (next) { activeRequests++; next(); }
+}
+
+async function apiRequest(path, opts, { form = false } = {}) {
+    await _acquireSlot();
     try {
-        const resp = await fetch(API_BASE + path, {
-            ...opts,
-            headers: {
-                'Content-Type': 'application/json',
-                ...(opts.headers || {}),
-            },
-        });
+        const resp = await fetch(API_BASE + path, form
+            ? { ...opts, method: (opts.method || 'POST'), body: opts.body }
+            : { ...opts, headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) } });
         if (!resp.ok) {
             const txt = await resp.text();
             throw new Error(`API ${resp.status}: ${txt}`);
         }
         return resp.json();
     } finally {
-        activeRequests--;
+        _releaseSlot();
     }
 }
 
-async function apiFormData(path, formData, opts = {}) {
-    activeRequests++;
-    if (activeRequests > MAX_CONCURRENT) {
-        activeRequests--;
-        throw new Error('Too many concurrent requests');
-    }
-    try {
-        const resp = await fetch(API_BASE + path, {
-            ...opts,
-            method: (opts.method || 'POST'),
-            body: formData,
-        });
-        if (!resp.ok) {
-            const txt = await resp.text();
-            throw new Error(`API ${resp.status}: ${txt}`);
-        }
-        return resp.json();
-    } finally {
-        activeRequests--;
-    }
-}
+function api(path, opts = {}) { return apiRequest(path, opts); }
+function apiFormData(path, formData, opts = {}) { return apiRequest(path, { ...opts, body: formData }, { form: true }); }
 
 // ── Overview ────────────────────────────────────────────────────────────────
 
@@ -490,7 +504,6 @@ const TREND_MAP = {
     emails: { deltaEl: 'kpi-emails-delta', sparkEl: 'kpi-emails-spark', upIsGood: true },
     files: { deltaEl: 'kpi-files-delta', sparkEl: 'kpi-files-spark', upIsGood: true },
     new: { deltaEl: 'kpi-new-delta', sparkEl: 'kpi-new-spark', upIsGood: true },
-    duplicates: { deltaEl: null, sparkEl: null, upIsGood: false },
 };
 
 function renderTrends(status) {
@@ -537,10 +550,12 @@ function renderSpark(svg, values) {
         `<circle cx="${last[0]}" cy="${last[1]}" r="2" fill="var(--accent)" stroke-dasharray="1 1.4" stroke-width="1"/>`;
 }
 
+const STAGED_COUNT_KEYS = ['staged', 'staged_pending', 'staged_awaiting_review', 'pending_review'];
+
 function updateStagedBadge(counts) {
     const badge = document.getElementById('staged-badge');
     if (!badge) return;
-    const n = counts ? firstCount(counts, ['staged', 'staged_pending', 'staged_awaiting_review', 'pending_review']) : null;
+    const n = counts ? firstCount(counts, STAGED_COUNT_KEYS) : null;
     if (typeof n === 'number' && n > 0) {
         badge.textContent = fmtInt(n);
         badge.hidden = false;
@@ -558,7 +573,7 @@ function firstCount(counts, keys) {
 
 function renderAttention(counts) {
     const defs = [
-        { el: 'attention-staged', countEl: 'kpi-staged', keys: ['staged', 'staged_pending', 'staged_awaiting_review', 'pending_review'] },
+        { el: 'attention-staged', countEl: 'kpi-staged', keys: STAGED_COUNT_KEYS },
         { el: 'attention-invalid-emails', countEl: 'kpi-dupes-att-emails', keys: ['invalid_emails'] },
         { el: 'attention-duplicates', countEl: 'kpi-dupes', keys: ['duplicates'] },
         { el: 'attention-missing', countEl: 'kpi-att-missing', keys: ['incomplete_records'] },
@@ -596,7 +611,7 @@ async function renderActivity(status) {
         const jobs = await api('/api/history');
         const results = (jobs && jobs.results) || [];
         results.slice(0, 5).forEach(r => {
-            const ok = String(r.status || '').toUpperCase() === 'OK';
+            const ok = isOkStatus(r.status);
             items.push(`<li><span class="activity-ic ${ok ? 'tone-success' : 'tone-danger'}"><svg class="icon" aria-hidden="true"><use href="#${ok ? 'i-file-text' : 'i-alert-circle'}"/></svg></span>
                 <span class="activity-text">Processed <strong title="${esc(r.file || '')}">${esc(r.file || 'unknown file')}</strong> — ${esc(r.status || 'unknown')}${r.contacts_found ? `, ${fmtInt(r.contacts_found)} contacts` : ''}</span>
                 <span class="activity-time">${esc(relTime(r.processed_at))}</span></li>`);
@@ -634,7 +649,6 @@ async function loadOverview() {
         renderAttention(counts);
         updateStagedBadge(counts);
         await renderActivity(status);
-        S.extractionRunId = (status.run && status.run.extraction_run_id) || null;
         hideBanner('contactsBanner');
     } catch (e) {
         ['kpi-contacts', 'kpi-emails', 'kpi-files', 'kpi-new', 'kpi-completeness'].forEach(id => {
@@ -708,12 +722,7 @@ function renderFileQueue() {
     if (!el) return;
     if (!fileQueue.length) { el.innerHTML = ''; syncExtractButtons(); return; }
     el.innerHTML = fileQueue.map((q, i) => {
-        const statusBadge = {
-            queued: '<span class="badge badge-neutral">Queued</span>',
-            processing: '<span class="badge badge-info">Processing…</span>',
-            done: '<span class="badge badge-success"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Done</span>',
-            failed: '<span class="badge badge-error"><svg class="icon" aria-hidden="true"><use href="#i-alert-circle"/></svg>Failed</span>',
-        }[q.status] || '';
+        const statusBadge = badgeFor('file', q.status);
         const actions = [];
         if (q.status === 'failed' && ACCEPT_EXTS.includes(fileExt(q.file.name))) {
             actions.push(`<button type="button" class="row-btn" title="Retry" aria-label="Retry ${esc(q.file.name)}" onclick="retryFile(${i})"><svg class="icon" aria-hidden="true"><use href="#i-rotate"/></svg></button>`);
@@ -805,7 +814,7 @@ async function startExtraction() {
         let okCount = 0, failCount = 0;
         valid.forEach((q, idx) => {
             const r = respResults.find(x => (x.file || '') === q.file.name) || respResults[idx] || {};
-            const ok = String(r.status || '').toUpperCase() === 'OK';
+            const ok = isOkStatus(r.status);
             q.status = ok ? 'done' : 'failed';
             q.error = r.error || (ok ? '' : r.status || 'Extraction failed');
             q.contactsFound = r.contacts_found != null ? r.contacts_found : null;
@@ -818,7 +827,7 @@ async function startExtraction() {
 
         results.innerHTML =
             respResults.map(r => {
-                const ok = String(r.status || '').toUpperCase() === 'OK';
+                const ok = isOkStatus(r.status);
                 return `<div class="result-item ${ok ? 'success' : 'error'}">
                     <svg class="icon" aria-hidden="true"><use href="#${ok ? 'i-check-circle' : 'i-x-circle'}"/></svg>
                     <span><strong>${esc(r.file || '')}</strong>: ${esc(r.status || '')} (${fmtInt(r.contacts_found || 0)} contacts)${r.error ? ' — ' + esc(r.error) : ''}</span>
@@ -850,13 +859,12 @@ async function loadContacts() {
     hideBanner('contactsBanner');
     skeletonRows('contactsBody', 6);
     try {
-        const data = await api('/api/contacts?page=' + S.contactsPage + '&size=' + S.contactsPageSize + '&sort=' + encodeURIComponent(S.sort) + '&dir=' + S.dir);
+        const data = await api('/api/contacts?page=' + S.contactsPage + '&size=' + S.contactsPageSize + '&sort=' + encodeURIComponent(contactsSort.key) + '&dir=' + contactsSort.dir);
         S.contacts = data.rows || [];
         S.contactsTotal = data.total != null ? Number(data.total) : S.contacts.length;
-        S.page = S.contactsPage; S.pageSize = S.contactsPageSize;
         applyContactFilter();
         renderPagination('contactsPagination', S.contactsTotal, S.contactsPage, S.contactsPageSize, (p) => {
-            S.contactsPage = p; S.page = p;
+            S.contactsPage = p;
             loadContacts();
         });
         const info = document.getElementById('contactsInfo');
@@ -864,7 +872,7 @@ async function loadContacts() {
     } catch (e) {
         showBanner('contactsBanner', 'error', 'Could not load contacts', e.message + ' — check that the local service is running.');
         document.getElementById('contactsBody').innerHTML =
-            `<tr><td colspan="6">${emptyStateHTML({ icon: 'i-alert-circle', title: 'Contacts unavailable', hint: 'The API did not answer. Press Refresh once the service is up.' })}</td></tr>`;
+            tableErrorRow(6, 'Contacts unavailable', 'The API did not answer. Press Refresh once the service is up.');
     }
 }
 
@@ -912,38 +920,47 @@ function renderContactsTable() {
     updateBulkBar();
 }
 
-let _searchTimer = null;
-async function searchContacts() {
-    clearTimeout(_searchTimer);
-    _searchTimer = setTimeout(async () => { await _searchContactsNow(); }, 250);
-}
+const _searchContactsDebounced = debounce(async () => { await _searchContactsNow(); }, 250);
+function searchContacts() { return _searchContactsDebounced(); }
 async function _searchContactsNow() {
     const q = ((document.getElementById('contactSearch') || {}).value || '');
     try {
-        const data = await api('/api/contacts?q=' + encodeURIComponent(q) + '&page=1&size=' + S.contactsPageSize + '&sort=' + encodeURIComponent(S.sort) + '&dir=' + S.dir);
+        const data = await api('/api/contacts?q=' + encodeURIComponent(q) + '&page=1&size=' + S.contactsPageSize + '&sort=' + encodeURIComponent(contactsSort.key) + '&dir=' + contactsSort.dir);
         S.contacts = data.rows || [];
         S.contactsTotal = data.total != null ? Number(data.total) : S.contacts.length;
-        S.contactsPage = 1; S.page = 1;
+        S.contactsPage = 1;
         applyContactFilter();
-        renderPagination('contactsPagination', S.contactsTotal, 1, S.contactsPageSize, (p) => { S.contactsPage = p; S.page = p; loadContacts(); });
+        renderPagination('contactsPagination', S.contactsTotal, 1, S.contactsPageSize, (p) => { S.contactsPage = p; loadContacts(); });
         const info = document.getElementById('contactsInfo');
         if (info) info.textContent = paginationInfo(S.contactsTotal, 1, S.contactsPageSize);
     } catch (e) { console.error(e); }
 }
 
 function filterContacts() {
-    S.contactsPage = 1; S.page = 1;
+    S.contactsPage = 1;
     applyContactFilter();
     const info = document.getElementById('contactsInfo');
     if (info) info.textContent = paginationInfo(S.contactsTotal, S.contactsPage, S.contactsPageSize);
 }
 
 function sortContacts(field) {
-    if (S.sort === field) S.dir = S.dir === 'asc' ? 'desc' : 'asc';
-    else { S.sort = field; S.dir = 'asc'; }
-    updateSortUI('contactsTable', field, S.dir);
-    S.contactsPage = 1; S.page = 1;
+    toggleSort(contactsSort, field);
+    updateSortUI('contactsTable', contactsSort.key, contactsSort.dir);
+    S.contactsPage = 1;
     loadContacts();
+}
+
+// One client-side comparator for the sortable tables.
+function compareValues(av, bv) {
+    return typeof av === 'number' && typeof bv === 'number'
+        ? av - bv
+        : String(av || '').localeCompare(String(bv || ''));
+}
+
+function toggleSort(state, field) {
+    if (state.key === field) state.dir = state.dir === 'asc' ? 'desc' : 'asc';
+    else { state.key = field; state.dir = 'asc'; }
+    return state;
 }
 
 function updateSortUI(tableId, activeField, dir) {
@@ -995,8 +1012,8 @@ function renderPagination(elId, total, page, size, onPage) {
 
 function changeContactsPageSize(v) {
     const n = Number(v) || 50;
-    S.contactsPageSize = n; S.pageSize = n;
-    S.contactsPage = 1; S.page = 1;
+    S.contactsPageSize = n;
+    S.contactsPage = 1;
     loadContacts();
 }
 
@@ -1004,18 +1021,19 @@ function exportContacts() {
     exportRowsCSV(S.contactsFiltered.length ? S.contactsFiltered : S.contacts, 'contacts.csv', 'contacts');
 }
 
-function exportRowsCSV(rows, filename, label) {
+// One CSV table writer for every export button.
+function exportRowsCSV(rows, filename, label, columns) {
+    columns = columns || [
+        ['ID', c => c.id],
+        ['Name', c => c.name || ''],
+        ['Email', c => contactEmail(c)],
+        ['Phone', c => c.phone_primary || ''],
+        ['Company', c => c.company || ''],
+    ];
     if (!rows || !rows.length) { toast(`Nothing to export yet — no ${label} loaded.`, { type: 'info' }); return; }
-    const header = ['ID', 'Name', 'Email', 'Phone', 'Company'];
-    const lines = [header.join(',')];
-    rows.forEach(c => {
-        lines.push([
-            c.id,
-            c.name || '',
-            c.email_primary || c.email || '',
-            c.phone_primary || '',
-            c.company || '',
-        ].map(csvCell).join(','));
+    const lines = [columns.map(([h]) => csvCell(h)).join(',')];
+    rows.forEach(row => {
+        lines.push(columns.map(([, get]) => csvCell(get(row))).join(','));
     });
     downloadFile(filename, '\ufeff' + lines.join('\r\n'));
     toast(`Exported ${fmtInt(rows.length)} ${label} to ${filename}`, { type: 'success' });
@@ -1068,11 +1086,9 @@ async function deleteSelectedContacts() {
         confirmLabel: 'Delete',
     });
     if (!yes) return;
-    let failed = 0;
-    for (const id of ids) {
-        try { await api('/api/contacts/' + id, { method: 'DELETE' }); }
-        catch (e) { failed++; }
-    }
+    const settled = await Promise.allSettled(
+        ids.map(id => api('/api/contacts/' + id, { method: 'DELETE' })));
+    const failed = settled.filter(r => r.status === 'rejected').length;
     if (failed) toast(`${ids.length - failed} deleted, ${failed} failed`, { type: 'error' });
     else toast(`${ids.length} contact${ids.length > 1 ? 's' : ''} deleted`, { type: 'success' });
     loadContacts();
@@ -1124,7 +1140,7 @@ function closeDrawer() {
 function contactFormFields(c) {
     return `
         <label class="field">Name<input type="text" id="dF-name" value="${esc(c.name || '')}"></label>
-        <label class="field">Email<input type="text" id="dF-email" class="mono" value="${esc(c.email_primary || c.email || '')}"></label>
+        <label class="field">Email<input type="text" id="dF-email" class="mono" value="${esc(contactEmail(c))}"></label>
         <label class="field">Phone<input type="text" id="dF-phone" class="mono" value="${esc(c.phone_primary || '')}"></label>
         <label class="field">Company<input type="text" id="dF-company" value="${esc(c.company || '')}"></label>`;
 }
@@ -1145,7 +1161,7 @@ function provenanceHTML(obj) {
 }
 
 function contactCompleteness(c) {
-    const fields = [c.name, c.email_primary || c.email, c.phone_primary, c.company];
+    const fields = [c.name, contactEmail(c), c.phone_primary, c.company];
     const filled = fields.filter(Boolean).length;
     return { filled, total: 4, pct: Math.round((filled / 4) * 100) };
 }
@@ -1157,10 +1173,7 @@ function viewContactProfile(id, row) {
     const name = c.name || '(no name)';
     const html = `
         <div class="dsec">
-            <div class="profile-top">
-                <span class="profile-avatar" aria-hidden="true">${esc(initials(name))}</span>
-                <div><div class="profile-name">${esc(name)}</div><div class="profile-company">${esc(c.company || 'No company')}</div></div>
-            </div>
+            ${profileHeaderHTML(c)}
             <div class="completeness">
                 <span class="completeness-track"><span class="completeness-fill" style="width:${comp.pct}%"></span></span>
                 <span class="completeness-label">${comp.pct}% complete</span>
@@ -1168,7 +1181,7 @@ function viewContactProfile(id, row) {
         </div>
         <div class="dsec"><h3>Contact details</h3><dl class="dgrid">
             <dt>Name</dt><dd>${esc(c.name || '—')}</dd>
-            <dt>Email</dt><dd class="mono">${esc(c.email_primary || c.email || '—')}</dd>
+            <dt>Email</dt><dd class="mono">${esc(contactEmail(c) || '—')}</dd>
             <dt>Phone</dt><dd class="mono">${esc(c.phone_primary || '—')}</dd>
             <dt>Company</dt><dd>${esc(c.company || '—')}</dd>
             <dt>ID</dt><dd class="mono">${esc(c.id)}</dd>
@@ -1181,9 +1194,9 @@ function viewContactProfile(id, row) {
     openDrawer(html, { title: 'Contact profile', sub: 'All data stays on this machine' });
 }
 
-async function editContact(id) {
-    const c = S.contacts.find(x => x.id === id);
-    if (!c) { toast('Contact not found in the loaded page.', { type: 'error' }); return; }
+// One drawer edit form; the contacts and staged review save to different
+// tables with different email-field vocabularies, everything else is shared.
+function openEditDrawer({ title, sub, c, emailField, url, onSaved, savedToast }) {
     const html = `
         <form class="drawer-form" id="drawerEditForm">
             ${contactFormFields(c)}
@@ -1192,27 +1205,40 @@ async function editContact(id) {
                 <button type="submit" class="btn btn-primary btn-sm">Save changes</button>
             </div>
         </form>`;
-    openDrawer(html, { title: 'Edit contact', sub: 'Changes are saved to your local database' });
+    openDrawer(html, { title, sub });
     $('#drawerEditForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const fields = {
             name: $('#dF-name').value,
-            email_primary: $('#dF-email').value,
+            [emailField]: $('#dF-email').value,
             phone_primary: $('#dF-phone').value,
             company: $('#dF-company').value,
         };
         try {
-            await api('/api/contacts/' + id, {
+            await api(url, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ fields: fields }),
             });
             closeDrawer();
-            toast('Contact updated', { type: 'success' });
-            loadContacts();
+            toast(savedToast, { type: 'success' });
+            onSaved();
         } catch (err) {
             toast('Could not save changes: ' + err.message, { type: 'error' });
         }
+    });
+}
+
+async function editContact(id) {
+    const c = S.contacts.find(x => x.id === id);
+    if (!c) { toast('Contact not found in the loaded page.', { type: 'error' }); return; }
+    openEditDrawer({
+        title: 'Edit contact',
+        sub: 'Changes are saved to your local database',
+        c, emailField: 'email_primary',
+        url: '/api/contacts/' + id,
+        onSaved: () => loadContacts(),
+        savedToast: 'Contact updated',
     });
 }
 
@@ -1232,8 +1258,7 @@ async function loadEmails() {
         const info = document.getElementById('emailsInfo');
         if (info) info.textContent = paginationInfo(S.emailsTotal, S.emailsPage, S.emailsPageSize);
     } catch (e) {
-        document.getElementById('emailsBody').innerHTML =
-            `<tr><td colspan="4">${emptyStateHTML({ icon: 'i-alert-circle', title: 'Emails unavailable', hint: e.message })}</td></tr>`;
+        document.getElementById('emailsBody').innerHTML = tableErrorRow(4, 'Emails unavailable', e.message);
     }
 }
 
@@ -1247,8 +1272,7 @@ function renderEmailsTable() {
         String(e.sender_name || '').toLowerCase().includes(q));
     if (emailsSort.key) {
         rows = rows.slice().sort((a, b) => {
-            const av = a[emailsSort.key], bv = b[emailsSort.key];
-            const cmp = typeof av === 'number' && typeof bv === 'number' ? av - bv : String(av || '').localeCompare(String(bv || ''));
+            const cmp = compareValues(a[emailsSort.key], b[emailsSort.key]);
             return emailsSort.dir === 'asc' ? cmp : -cmp;
         });
     }
@@ -1273,19 +1297,19 @@ function renderEmailsTable() {
 async function searchEmails() { renderEmailsTable(); }
 
 function sortEmails(field) {
-    if (emailsSort.key === field) emailsSort.dir = emailsSort.dir === 'asc' ? 'desc' : 'asc';
-    else emailsSort = { key: field, dir: 'asc' };
+    toggleSort(emailsSort, field);
     updateSortUI('emailsTable', field, emailsSort.dir);
     renderEmailsTable();
 }
 
 function exportEmails() {
     const rows = S.emails || [];
-    if (!rows.length) { toast('Nothing to export yet — no emails loaded.', { type: 'info' }); return; }
-    const lines = [['Subject', 'Sender', 'Date', 'Contacts'].join(',')];
-    rows.forEach(e => lines.push([e.subject || '', e.sender_name || '', e.date || '', e.contact_count || 0].map(csvCell).join(',')));
-    downloadFile('emails.csv', '\ufeff' + lines.join('\r\n'));
-    toast(`Exported ${fmtInt(rows.length)} emails to emails.csv`, { type: 'success' });
+    exportRowsCSV(rows, 'emails.csv', 'emails', [
+        ['Subject', e => e.subject || ''],
+        ['Sender', e => e.sender_name || ''],
+        ['Date', e => e.date || ''],
+        ['Contacts', e => e.contact_count || 0],
+    ]);
 }
 
 // ── Customer Profiles ────────────────────────────────────────────────────────
@@ -1326,13 +1350,7 @@ function renderCustomerProfiles() {
         const comp = contactCompleteness(c);
         const name = c.name || '(no name)';
         return `<article class="profile-card">
-            <div class="profile-top">
-                <span class="profile-avatar" aria-hidden="true">${esc(initials(name))}</span>
-                <div style="min-width:0">
-                    <div class="profile-name" title="${esc(name)}">${esc(name)}</div>
-                    <div class="profile-company">${esc(c.company || 'No company')}</div>
-                </div>
-            </div>
+            ${profileHeaderHTML(c, { minWidth0: true, title: true })}
             <div class="profile-fields">
                 <div class="row"><span class="k">Email</span><span class="v" title="${esc(c.email_primary || '')}">${esc(c.email_primary || '—')}</span></div>
                 <div class="row"><span class="k">Phone</span><span class="v" title="${esc(c.phone_primary || '')}">${esc(c.phone_primary || '—')}</span></div>
@@ -1357,41 +1375,70 @@ async function loadStagedContacts(page) {
     try {
         const data = await api(`/api/staged-contacts?page=${target}&size=${S.stagedPageSize || 20}`);
         stagedContactsCache = data.rows || [];
-        S.stagedCache = stagedContactsCache;
         S.stagedTotal = data.total != null ? Number(data.total) : stagedContactsCache.length;
         renderStagedContactsTable(stagedContactsCache, S.stagedTotal, data.page || target, data.pageSize || S.stagedPageSize || 20, (p) => {
             S.stagedReviewPage = p;
             loadStagedContacts(p);
         });
     } catch (e) {
-        document.getElementById('stagedContactsBody').innerHTML =
-            `<tr><td colspan="10">${emptyStateHTML({ icon: 'i-alert-circle', title: 'Staged contacts unavailable', hint: e.message })}</td></tr>`;
+        document.getElementById('stagedContactsBody').innerHTML = tableErrorRow(10, 'Staged contacts unavailable', e.message);
     }
 }
 
+function rowIdx() { return stagedCursor < 0 ? 0 : stagedCursor; }
+
+// One badge factory for every status vocabulary in the app. Each family is
+// a small lookup; anything unmapped falls back to the neutral default.
+const BADGES = {
+    review: {
+        NEW: ['badge-neutral', null, 'New'],
+        NEEDS_REVIEW: ['badge-warning', null, 'Needs review'],
+        READY: ['badge-info', null, 'Ready'],
+        APPROVED: ['badge-success', 'i-check', 'Approved'],
+        REJECTED: ['badge-error', 'i-x', 'Rejected'],
+        DISMISSED: ['badge-neutral', null, 'Dismissed'],
+    },
+    dedup: {
+        UNIQUE: ['badge-success', null, 'Unique'],
+        EXACT_DUPLICATE: ['badge-error', null, 'Exact duplicate'],
+        PROBABLE_DUPLICATE: ['badge-warning', null, 'Probable duplicate'],
+        CONFLICT: ['badge-error', null, 'Conflict'],
+    },
+    import: {
+        NEW_CONTACT_CREATED: ['badge-success', null, 'New contact'],
+        EXISTING_CONTACT_ENRICHED: ['badge-warning', null, 'Existing contact'],
+        IMPORT_FAILED: ['badge-error', null, 'Import failed'],
+    },
+    file: {
+        queued: ['badge-neutral', null, 'Queued'],
+        processing: ['badge-info', null, 'Processing…'],
+        done: ['badge-success', 'i-check', 'Done'],
+        failed: ['badge-error', 'i-alert-circle', 'Failed'],
+    },
+};
+const BADGE_DEFAULTS = {
+    review: ['badge-neutral', null, 'New'],
+    dedup: ['badge-neutral', null, 'Not checked'],
+    import: ['badge-neutral', null, 'Not imported'],
+    file: ['badge-neutral', null, ''],
+};
+
+function badgeFor(kind, value) {
+    const [cls, icon, label] = (BADGES[kind] || {})[value] || BADGE_DEFAULTS[kind];
+    const ic = icon ? `<svg class="icon" aria-hidden="true"><use href="#${icon}"/></svg>` : '';
+    return label ? `<span class="badge ${cls}">${ic}${label}</span>` : '';
+}
+
+function isOkStatus(s) {
+    return String(s || '').toUpperCase() === 'OK';
+}
+
 function stagedBadge(reviewStatus, dedupStatus, importStatus) {
-    let reviewBadge = '<span class="badge badge-neutral">New</span>';
-    switch (reviewStatus) {
-        case 'NEEDS_REVIEW': reviewBadge = '<span class="badge badge-warning">Needs review</span>'; break;
-        case 'READY': reviewBadge = '<span class="badge badge-info">Ready</span>'; break;
-        case 'APPROVED': reviewBadge = '<span class="badge badge-success"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Approved</span>'; break;
-        case 'REJECTED': reviewBadge = '<span class="badge badge-error"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>Rejected</span>'; break;
-        case 'DISMISSED': reviewBadge = '<span class="badge badge-neutral">Dismissed</span>'; break;
-    }
-    let dedupBadge = '<span class="badge badge-neutral">Not checked</span>';
-    switch (dedupStatus) {
-        case 'UNIQUE': dedupBadge = '<span class="badge badge-success">Unique</span>'; break;
-        case 'EXACT_DUPLICATE': dedupBadge = '<span class="badge badge-error">Exact duplicate</span>'; break;
-        case 'PROBABLE_DUPLICATE': dedupBadge = '<span class="badge badge-warning">Probable duplicate</span>'; break;
-        case 'CONFLICT': dedupBadge = '<span class="badge badge-error">Conflict</span>'; break;
-    }
-    let importBadge = '<span class="badge badge-neutral">Not imported</span>';
-    switch (importStatus) {
-        case 'NEW_CONTACT_CREATED': importBadge = '<span class="badge badge-success">New contact</span>'; break;
-        case 'EXISTING_CONTACT_ENRICHED': importBadge = '<span class="badge badge-warning">Existing contact</span>'; break;
-        case 'IMPORT_FAILED': importBadge = '<span class="badge badge-error">Import failed</span>'; break;
-    }
-    return { reviewBadge, dedupBadge, importBadge };
+    return {
+        reviewBadge: badgeFor('review', reviewStatus),
+        dedupBadge: badgeFor('dedup', dedupStatus),
+        importBadge: badgeFor('import', importStatus),
+    };
 }
 
 function visibleStagedRows() {
@@ -1406,7 +1453,9 @@ function visibleStagedRows() {
     return rows;
 }
 
-function renderStagedContactsTable(staged, total, page, pageSize, onPageChange) {
+// rebindPagination: false keeps pagination/info intact for in-place row updates
+// (row actions re-render the table without rebinding pagination).
+function renderStagedContactsTable(staged, total, page, pageSize, onPageChange, rebindPagination = true) {
     const tbody = document.getElementById('stagedContactsBody');
     if (!tbody) return;
     const rows = visibleStagedRows();
@@ -1419,7 +1468,7 @@ function renderStagedContactsTable(staged, total, page, pageSize, onPageChange) 
             ctaLabel: filtered ? null : 'Extract a file',
             ctaFn: "showView('extract')",
         })}</td></tr>`;
-        if (onPageChange) renderStagedPagination(total, page, pageSize, onPageChange);
+        if (rebindPagination) renderStagedPagination(total, page, pageSize, onPageChange);
         const info = document.getElementById('stagedInfo');
         if (info) info.textContent = paginationInfo(total || 0, page || 1, pageSize || 20);
         return;
@@ -1450,7 +1499,7 @@ function renderStagedContactsTable(staged, total, page, pageSize, onPageChange) 
         </tr>`;
     }).join('');
 
-    renderStagedPagination(total, page, pageSize, onPageChange);
+    if (rebindPagination) renderStagedPagination(total, page, pageSize, onPageChange);
     const info = document.getElementById('stagedInfo');
     if (info) info.textContent = paginationInfo(total || 0, page || 1, pageSize || 20);
     syncStagedBulk();
@@ -1477,13 +1526,17 @@ function syncStagedBulk() {
 async function bulkApproveStaged() {
     const ids = $$('#stagedContactsBody .row-check:checked').map(cb => Number(cb.dataset.id));
     if (!ids.length) return;
-    let ok = 0, failed = 0;
-    for (const id of ids) {
-        try { await api(`/api/staged-contacts/${id}/approve`, { method: 'POST' }); ok++; }
-        catch (e) { failed++; }
-    }
+    let ok = 0, failed = ids.length;
+    try {
+        const res = await api('/api/staged-contacts/bulk-action', {
+            method: 'POST',
+            body: JSON.stringify({ staged_ids: ids, action: 'approve' }),
+        });
+        ok = res.approved || 0;
+        failed = res.failed || 0;
+    } catch (e) { failed = ids.length; }
     toast(`${ok} contact${ok === 1 ? '' : 's'} approved${failed ? `, ${failed} failed` : ''}`, { type: failed ? 'error' : 'success' });
-    loadStagedContacts();
+    loadStagedContacts(S.stagedReviewPage);
     loadOverview();
 }
 
@@ -1495,15 +1548,15 @@ async function stagedDecide(stagedId, action, opts) {
     const prevState = row ? { review_status: row.review_status } : null;
     const labels = { approve: 'approved', reject: 'rejected', dismiss: 'dismissed' };
     if (row && !opts.silent) row.review_status = action === 'approve' ? 'APPROVED' : (action === 'reject' ? 'REJECTED' : 'DISMISSED');
-    renderStagedContactsTable(stagedContactsCache, S.stagedTotal, S.stagedReviewPage, S.stagedPageSize, null);
+    renderStagedContactsTable(stagedContactsCache, S.stagedTotal, S.stagedReviewPage, S.stagedPageSize, null, false);
     try {
         await api(`/api/staged-contacts/${stagedId}/${action}`, { method: 'POST' });
         toast(`Contact ${labels[action]}`, { type: 'success' });
         loadOverview();
-        loadStagedContacts();
+        loadStagedContacts(S.stagedReviewPage);
     } catch (e) {
         if (row && prevState) row.review_status = prevState.review_status;
-        renderStagedContactsTable(stagedContactsCache, S.stagedTotal, S.stagedReviewPage, S.stagedPageSize, null);
+        renderStagedContactsTable(stagedContactsCache, S.stagedTotal, S.stagedReviewPage, S.stagedPageSize, null, false);
         toast(`Could not ${action} contact: ${e.message}`, { type: 'error' });
     }
 }
@@ -1519,10 +1572,7 @@ function viewStagedDetail(stagedId) {
     const b = stagedBadge(c.review_status || 'NEW', c.dedup_status || 'NOT_CHECKED', c.import_status || 'NOT_IMPORTED');
     const html = `
         <div class="dsec">
-            <div class="profile-top">
-                <span class="profile-avatar" aria-hidden="true">${esc(initials(name))}</span>
-                <div><div class="profile-name">${esc(name)}</div><div class="profile-company">${esc(c.company || 'No company')}</div></div>
-            </div>
+            ${profileHeaderHTML(c)}
             <div style="display:flex;gap:8px;flex-wrap:wrap">${b.reviewBadge}${b.dedupBadge}${b.importBadge}</div>
         </div>
         <div class="dsec"><h3>Extracted fields</h3><dl class="dgrid">
@@ -1544,35 +1594,13 @@ function viewStagedDetail(stagedId) {
 async function editStagedContact(stagedId) {
     const c = stagedContactsCache.find(x => x.id === stagedId);
     if (!c) return;
-    const html = `
-        <form class="drawer-form" id="drawerEditForm">
-            ${contactFormFields(c)}
-            <div class="drawer-actions">
-                <button type="button" class="btn btn-secondary btn-sm" onclick="closeDrawer()">Cancel</button>
-                <button type="submit" class="btn btn-primary btn-sm">Save changes</button>
-            </div>
-        </form>`;
-    openDrawer(html, { title: 'Edit staged contact', sub: 'Fix fields before approving into the CRM' });
-    $('#drawerEditForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const fields = {
-            name: $('#dF-name').value,
-            email: $('#dF-email').value,
-            phone_primary: $('#dF-phone').value,
-            company: $('#dF-company').value,
-        };
-        try {
-            await api(`/api/staged-contacts/${stagedId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fields: fields }),
-            });
-            closeDrawer();
-            toast('Staged contact updated', { type: 'success' });
-            loadStagedContacts();
-        } catch (err) {
-            toast('Could not save changes: ' + err.message, { type: 'error' });
-        }
+    openEditDrawer({
+        title: 'Edit staged contact',
+        sub: 'Fix fields before approving into the CRM',
+        c, emailField: 'email',
+        url: `/api/staged-contacts/${stagedId}`,
+        onSaved: () => loadStagedContacts(S.stagedReviewPage),
+        savedToast: 'Staged contact updated',
     });
 }
 
@@ -1590,7 +1618,7 @@ function stagedKeydown(e) {
     if (!rows.length) return;
     const move = (delta) => {
         stagedCursor = Math.max(0, Math.min(rows.length - 1, (stagedCursor < 0 ? (delta > 0 ? -1 : 0) : stagedCursor) + delta));
-        renderStagedContactsTable(stagedContactsCache, S.stagedTotal, S.stagedReviewPage, S.stagedPageSize, null);
+        renderStagedContactsTable(stagedContactsCache, S.stagedTotal, S.stagedReviewPage, S.stagedPageSize, null, false);
         const tr = $(`#stagedContactsBody tr[data-idx="${stagedCursor}"]`);
         if (tr) {
             tr.scrollIntoView({ block: 'nearest' });
@@ -1601,11 +1629,11 @@ function stagedKeydown(e) {
     switch (e.key) {
         case 'j': case 'J': case 'ArrowDown': e.preventDefault(); move(1); break;
         case 'k': case 'K': case 'ArrowUp': e.preventDefault(); move(-1); break;
-        case 'a': case 'A': e.preventDefault(); stagedDecide(rows[stagedCursor < 0 ? 0 : stagedCursor].id, 'approve'); break;
-        case 'r': case 'R': e.preventDefault(); stagedDecide(rows[stagedCursor < 0 ? 0 : stagedCursor].id, 'reject'); break;
-        case 'd': case 'D': e.preventDefault(); stagedDecide(rows[stagedCursor < 0 ? 0 : stagedCursor].id, 'dismiss'); break;
+        case 'a': case 'A': e.preventDefault(); stagedDecide(rows[rowIdx()].id, 'approve'); break;
+        case 'r': case 'R': e.preventDefault(); stagedDecide(rows[rowIdx()].id, 'reject'); break;
+        case 'd': case 'D': e.preventDefault(); stagedDecide(rows[rowIdx()].id, 'dismiss'); break;
         case 'Enter': {
-            const idx = stagedCursor < 0 ? 0 : stagedCursor;
+            const idx = rowIdx();
             e.preventDefault();
             viewStagedDetail(rows[idx].id);
             break;
@@ -1645,8 +1673,7 @@ async function loadDataQuality() {
             const el = document.getElementById(id);
             if (el) el.textContent = '—';
         });
-        const card = document.getElementById('quality-detail-card');
-        if (card) showBanner('settingsBanner', 'error', 'Could not load data quality', e.message);
+        showBanner('settingsBanner', 'error', 'Could not load data quality', e.message);
     }
 }
 
@@ -1661,8 +1688,7 @@ async function loadHistory() {
         const info = document.getElementById('historyInfo');
         if (info) info.textContent = `${fmtInt(S.historyRows.length)} file${S.historyRows.length === 1 ? '' : 's'} processed`;
     } catch (e) {
-        document.getElementById('historyBody').innerHTML =
-            `<tr><td colspan="4">${emptyStateHTML({ icon: 'i-alert-circle', title: 'History unavailable', hint: e.message })}</td></tr>`;
+        document.getElementById('historyBody').innerHTML = tableErrorRow(4, 'History unavailable', e.message);
     }
 }
 
@@ -1674,10 +1700,7 @@ function renderHistoryTable() {
     if (q) rows = rows.filter(r => String(r.file || '').toLowerCase().includes(q));
     if (historySort.key) {
         rows = rows.slice().sort((a, b) => {
-            const av = a[historySort.key], bv = b[historySort.key];
-            const cmp = typeof av === 'number' && typeof bv === 'number'
-                ? av - bv
-                : String(av || '').localeCompare(String(bv || ''));
+            const cmp = compareValues(a[historySort.key], b[historySort.key]);
             return historySort.dir === 'asc' ? cmp : -cmp;
         });
     }
@@ -1692,7 +1715,7 @@ function renderHistoryTable() {
         return;
     }
     tbody.innerHTML = rows.map(r => {
-        const ok = String(r.status || '').toUpperCase() === 'OK';
+        const ok = isOkStatus(r.status);
         const badge = ok
             ? '<span class="badge badge-success"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>OK</span>'
             : `<span class="badge badge-error"><svg class="icon" aria-hidden="true"><use href="#i-x-circle"/></svg>${esc(r.status || 'unknown')}</span>`;
@@ -1708,8 +1731,7 @@ function renderHistoryTable() {
 function filterHistory() { renderHistoryTable(); }
 
 function sortHistory(field) {
-    if (historySort.key === field) historySort.dir = historySort.dir === 'asc' ? 'desc' : 'asc';
-    else historySort = { key: field, dir: 'asc' };
+    toggleSort(historySort, field);
     updateSortUI('historyTable', field, historySort.dir);
     renderHistoryTable();
 }
@@ -1738,7 +1760,6 @@ async function loadSettings() {
             api('/api/providers/catalog').catch(() => ({ catalog: [] })),
             api('/api/reliability').catch(() => ({ reliability: null })),
         ]);
-        window.CRM_SETTINGS = settings;
         PROVIDER_CATALOG = (catalog && catalog.catalog) || [];
         settingsWorking = (settings.chain || []).map(x => Object.assign({}, x));
         renderSettings({ chain: settingsWorking });
@@ -1930,12 +1951,12 @@ function renderPrompts() {
 }
 
 async function loadPrompts() {
-    const list = await api('/api/prompts');
-    for (const kind of ['contact', 'eml']) {
-        const detail = await api(`/api/prompts/${kind}`);
-        promptsWorking[kind] = detail;
-    }
-    void list;
+    const [contact, eml] = await Promise.all([
+        api('/api/prompts/contact'),
+        api('/api/prompts/eml'),
+    ]);
+    promptsWorking.contact = contact;
+    promptsWorking.eml = eml;
     renderPrompts();
 }
 
@@ -1995,7 +2016,6 @@ async function resetPrompt(kind) {
 function addProvider() {
     if (!settingsWorking) settingsWorking = [];
     settingsWorking.push({ provider: '', model: '', api_key: '', enabled: true });
-    window.CRM_SETTINGS_CHAIN = settingsWorking; // legacy global kept in sync
     renderSettings({ chain: settingsWorking });
     markSettingsDirty(true);
 }
@@ -2006,7 +2026,6 @@ function addProviderSetting() { addProvider(); }
 function updateProviderSetting(idx, field, value) {
     if (!settingsWorking || !settingsWorking[idx]) return;
     settingsWorking[idx][field] = value;
-    window.CRM_SETTINGS_CHAIN = settingsWorking;
     if (field === 'enabled') renderSettings({ chain: settingsWorking });
     markSettingsDirty(true);
 }
@@ -2172,9 +2191,9 @@ async function loadAnalytics() {
 
     // Reachability — share of contacts reachable by email and/or phone.
     if (rows.length) {
-        const both = rows.filter(r => (r.email_primary || r.email) && r.phone_primary).length;
-        const emailOnly = rows.filter(r => (r.email_primary || r.email) && !r.phone_primary).length;
-        const phoneOnly = rows.filter(r => !(r.email_primary || r.email) && r.phone_primary).length;
+        const both = rows.filter(r => contactEmail(r) && r.phone_primary).length;
+        const emailOnly = rows.filter(r => contactEmail(r) && !r.phone_primary).length;
+        const phoneOnly = rows.filter(r => !contactEmail(r) && r.phone_primary).length;
         const none = rows.length - both - emailOnly - phoneOnly;
         const reachablePct = Math.round((both + emailOnly + phoneOnly) / rows.length * 100);
         setTakeaway('analytics-reachability-takeaway', `${reachablePct}% of contacts are reachable`);
@@ -2234,17 +2253,11 @@ function toggleDensity(tableId) {
 const palette = {
     el: null, input: null, list: null,
     open: false, items: [], view: [], active: 0,
-    contactTimer: null, built: false,
+    built: false,
 };
 
 function paletteBuildStatic() {
-    const views = [
-        ['overview', 'Overview', 'i-dashboard'], ['extract', 'Extract', 'i-upload'],
-        ['staged', 'Staged review', 'i-inbox'], ['contacts', 'Contacts', 'i-users'],
-        ['emails', 'Emails', 'i-mail'], ['profiles', 'Customer Profiles', 'i-contact'],
-        ['analytics', 'Analytics', 'i-chart'], ['quality', 'Data Quality', 'i-shield'],
-        ['history', 'History', 'i-history'], ['settings', 'Settings', 'i-settings'],
-    ];
+    const views = Object.entries(VIEW_TITLES).map(([id, label]) => [id, label, VIEW_ICONS[id]]);
     const items = views.map(([id, label, icon]) => ({
         group: 'Go to view', icon, label, type: 'View', kbd: '',
         run: () => showView(id),
@@ -2325,21 +2338,18 @@ function paletteRun(idx) {
     if (it.run) it.run();
 }
 
-function paletteSearchContacts(q) {
-    clearTimeout(palette.contactTimer);
-    palette.contactTimer = setTimeout(async () => {
+const paletteSearchContacts = debounce(async (q) => {
         try {
             const data = await api('/api/contacts?q=' + encodeURIComponent(q) + '&page=1&size=5');
             const rows = data.rows || [];
             palette.contactResults = rows.map(c => ({
                 group: 'Contacts', icon: 'i-users', type: 'Contact',
-                label: `${c.name || '(no name)'} — ${c.email_primary || c.email || 'no email'}`,
+                label: `${c.name || '(no name)'} — ${contactEmail(c) || 'no email'}`,
                 run: () => viewContactProfile(c.id, c),
             }));
         } catch (e) { palette.contactResults = []; }
         paletteRender();
-    }, 150);
-}
+}, 150);
 
 function openPalette() {
     // Never open the palette under an open native modal <dialog> (e.g. the
@@ -2485,14 +2495,35 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Density init from stored preference
-    try {
-        if (localStorage.getItem('crm-density') === 'compact') {
-            document.documentElement.setAttribute('data-density', 'compact');
-            $$('.table-container').forEach(c => c.setAttribute('data-density', 'compact'));
-            $$('[id$="Density"]').forEach(b => b.setAttribute('aria-pressed', 'true'));
+    // Density init (global + per-table preferences)
+    const densityTables = ['contactsTable', 'emailsTable', 'historyTable'];
+    let globalCompact = false;
+    try { globalCompact = localStorage.getItem('crm-density') === 'compact'; } catch (e) { /* ignore */ }
+    if (globalCompact) document.documentElement.setAttribute('data-density', 'compact');
+    $$('.table-container').forEach(c => {
+        const table = c.querySelector('table');
+        const id = table && table.id;
+        let compact = globalCompact;
+        if (id) {
+            try {
+                const pref = localStorage.getItem('crm-density-' + id);
+                if (pref === 'compact' || pref === 'comfortable') compact = pref === 'compact';
+            } catch (e) { /* ignore */ }
         }
-    } catch (e) { /* ignore */ }
+        c.setAttribute('data-density', compact ? 'compact' : 'comfortable');
+    });
+    densityTables.forEach(id => {
+        const btn = document.getElementById(id.replace('Table', 'Density'));
+        if (btn) {
+            const compact = (() => {
+                try {
+                    const pref = localStorage.getItem('crm-density-' + id);
+                    return pref ? pref === 'compact' : globalCompact;
+                } catch (e) { return globalCompact; }
+            })();
+            btn.setAttribute('aria-pressed', compact ? 'true' : 'false');
+        }
+    });
 
     // Drawer + keyboard wiring
     document.addEventListener('keydown', stagedKeydown);
@@ -2544,6 +2575,6 @@ document.addEventListener('DOMContentLoaded', () => {
     try { initPalette(); } catch (e) { console.warn('Palette init skipped:', e); }
 
     // Initial view from hash
-    const hash = location.hash.replace('#/', '').replace('#', '');
+    const hash = parseHash();
     showView(VIEW_TITLES[hash] ? hash : 'overview');
 });

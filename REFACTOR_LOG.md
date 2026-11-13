@@ -173,3 +173,52 @@ Removed dead interfaces (db.py):
   hand after the automated pass.
 - Suite 404 passed (down 3 = dead-code tests), contract audit identical to
   baseline. Frontend untouched.
+
+## D-U5 (Phase 5, done): frontend consolidation (static/app.js, boot.js, index.html)
+
+Behaviour preserved; onclick global contract and tools/contract_audit.py
+lists unchanged (audit identical modulo API-URL listing: '/api/prompts' →
+'/api/prompts/contact'+'/api/prompts/eml', added '/api/staged-contacts/bulk-action').
+
+- One API client (`apiRequest`) with a real wait queue (7th caller waits
+  instead of throwing); `api`/`apiFormData` kept as function declarations
+  (audit contract).
+- One badge factory (`badgeFor` + BADGES/BADGE_DEFAULTS tables) for review /
+  dedup / import / file vocabularies; stagedBadge consumes it; `isOkStatus`
+  replaces 4 identical uppercase checks.
+- One view dispatch: `VIEW_LOADERS` shared by swapView + refreshData;
+  `VIEW_ICONS`/`VIEW_TITLES` are the single label/icon lists (palette derives
+  from them).
+- One pagination path (existing renderPagination kept); one error-row helper
+  (`tableErrorRow`) used at all 4 sites; sort toggle unified (`toggleSort`),
+  contacts switched to the shared `{key,dir}` object; comparator shared.
+- One contact-email accessor (`contactEmail`) applied at the 8 fallback sites;
+  one `profileHeaderHTML` for the 3 profile-header sites; one `contactEmail`
+  for exports; one `compareValues`.
+- Density: boot.js keeps only theme/sidebar pre-paint restore; app.js owns
+  global + per-table density init — per-table preferences now actually apply
+  on load (were saved but never restored).
+- Declared implicit global `reliabilityWorking`; deleted write-only globals
+  (window.CRM_SETTINGS, window.CRM_SETTINGS_CHAIN, S.stagedCache), dead state
+  (S.emaills, S.extractionRunId, S.fileQueue, S.dedupChecking, S.page/pageSize
+  mirrors), `void list` fetch (settings prompts load = 2 parallel fetches),
+  dead `quality-detail-card` var, all unused imports flagged by an AST scan.
+- Bulk approve now goes through the server bulk-action endpoint (one
+  transaction) instead of N sequential client calls; bulk delete parallelized
+  via allSettled; staged bulk loops deleted.
+- `S.page/S.pageSize` manual mirrors deleted — loadContacts/search/filter use
+  S.contactsPage directly; `stagedCursor` guards share `rowIdx()`;
+  `loadStagedContacts()` call sites pass explicit page; the `null`
+  mode-flag at renderStagedContactsTable became an explicit
+  `rebindPagination` boolean; `debounce` used for search + palette search.
+- Inline onclick contract retained; contract_audit MISSING DEFINITIONS: none,
+  MISSING IDS identical to baseline; index.html wiring untouched except the
+  boot script include.
+- E2E (scratch HOME, Playwright): extract 3 files via real UI → staged 11 →
+  keyboard triage → approve → contacts; bulk-approve button; theme toggle +
+  density persistence across reload; hash navigation; palette; all views;
+  **zero console/page errors**.
+- Note: early E2E "failures" were test artifacts (server started from the
+  wrong cwd serving the user's uncommitted WIP app.js) — resolved by
+  restarting from this worktree; no defect was in the refactored code.
+- Suite: **404 passed, 1 xfailed** (frontend changes don't touch tests).

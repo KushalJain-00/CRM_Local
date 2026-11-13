@@ -5,27 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>CRM Local</title>
-<script>
-/* Theme boot: runs before first paint so there is no flash of wrong theme.
-   Sets resolved theme (data-theme) + kept preference (data-theme-mode). */
-(function () {
-  try {
-    var mode = localStorage.getItem('crm-theme-mode') || localStorage.getItem('crm-theme') || 'system';
-    if (mode !== 'light' && mode !== 'dark') mode = 'system';
-    var resolved = mode === 'system'
-      ? (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-      : mode;
-    document.documentElement.setAttribute('data-theme', resolved);
-    document.documentElement.setAttribute('data-theme-mode', mode);
-    if (localStorage.getItem('crm-sb-collapsed') === '1') {
-      document.documentElement.classList.add('sb-collapsed');
-    }
-    if (localStorage.getItem('crm-density') === 'compact') {
-      document.documentElement.setAttribute('data-density', 'compact');
-    }
-  } catch (e) { /* localStorage unavailable -> defaults */ }
-})();
-</script>
+<script src="/static/boot.js"></script>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
