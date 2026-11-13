@@ -1,0 +1,110 @@
+{
+  "description": "Synthetic prompt-evaluation corpus. Layer-1 deterministic expectations are asserted exactly; AI-path expectations are exercised through a mocked provider. No PII.",
+  "documents": {
+    "company_product.csv": {
+      "expected": [{"name": "Ravi Deshmukh", "email_primary": "ravi.d@kexample.com"}],
+      "expected_null": ["company", "designation", "city", "pincode"],
+      "excluded": ["FlowMaster Pro"]
+    },
+    "designation_industry.csv": {
+      "expected": [{"name": "Anita Rao", "email_primary": "anita@kexample.com"}],
+      "expected_null": ["designation", "company"],
+      "excluded": ["Chemicals"]
+    },
+    "conflict_phones.csv": {
+      "expected": [{"name": "Devang Joshi", "email_primary": "devang@kexample.com", "phone_primary": "9000000011", "phone_secondary": "9000000022"}],
+      "expected_null": ["company", "designation"],
+      "excluded": []
+    },
+    "shared_company.csv": {
+      "expected": [
+        {"name": "Ops Asha", "email_primary": "ops1@kexample.com", "company": "Northwind Traders"},
+        {"name": "Ops Bina", "email_primary": "ops2@kexample.com", "company": "Northwind Traders"},
+        {"name": "Ops Chetan", "email_primary": "ops3@kexample.com", "company": "Northwind Traders"}
+      ],
+      "expected_null": [],
+      "excluded": []
+    },
+    "leading_zeros.csv": {
+      "expected": [{"name": "Farida Khan", "email_primary": "farida@kexample.com", "pincode": "001267"}],
+      "expected_null": ["company"],
+      "excluded": []
+    },
+    "invoice_refs.csv": {
+      "expected": [{"name": "Gaurav Saini", "email_primary": "gaurav@kexample.com", "phone_primary": "9000000061"}],
+      "expected_null": ["company", "designation"],
+      "excluded": ["9876543210"]
+    },
+    "injection.csv": {
+      "expected": [{"name": "Real Person", "email_primary": "real@kexample.com"}],
+      "expected_null": ["company"],
+      "excluded": ["999"]
+    },
+    "no_header.csv": {
+      "expected": [],
+      "expected_null": [],
+      "excluded": []
+    },
+    "sparse.csv": {
+      "expected": [],
+      "expected_null": [],
+      "excluded": []
+    },
+    "repeated_headers.pdf": {
+      "expected": [
+        {"name": "Person Page 1", "email_primary": "pag1@kexample.com"},
+        {"name": "Person Page 2", "email_primary": "pag2@kexample.com"}
+      ],
+      "expected_null": [],
+      "excluded": ["CONFIDENTIAL"]
+    }
+  },
+  "eml": {
+    "no_signature.eml": {
+      "expected": [{"name": "Priya Nair", "email_primary": "priya@kexample.com"}],
+      "expected_null": ["company", "designation"],
+      "excluded": ["Desk"]
+    },
+    "replyto_differs.eml": {
+      "expected": [{"email_primary": "billing@iota.com"}],
+      "expected_null": ["designation", "pincode"],
+      "excluded": ["invoices@iota.com"]
+    },
+    "automated.eml": {
+      "expected": [{"email_primary": "noreply@iota-systems.com"}],
+      "expected_null": ["designation"],
+      "excluded": ["5521"]
+    },
+    "shared_inbox.eml": {
+      "expected": [{"email_primary": "sales@iota-systems.com"}],
+      "expected_null": ["designation", "pincode"],
+      "excluded": []
+    },
+    "malicious.eml": {
+      "expected": [{"name": "Sanjay Mehta", "email_primary": "sanjay@kexample.com", "phone_primary": "+91 99000 12345"}],
+      "expected_count": 1,
+      "expected_null": [],
+      "excluded": ["admin mode", "999"]
+    },
+    "body_mention.eml": {
+      "expected": [{"email_primary": "rohit@kexample.com", "name": "Rohit Verma"}],
+      "expected_null": ["company", "designation"],
+      "excluded": ["sharma.b@somethingelse.com"]
+    },
+    "multilingual.eml": {
+      "expected": [{"email_primary": "anita.d@kexample.com"}],
+      "expected_null": ["pincode"],
+      "excluded": []
+    },
+    "html_signature.eml": {
+      "expected": [{"name": "Maya Iyer", "email_primary": "maya.i@kexample.com"}],
+      "expected_null": ["pincode"],
+      "excluded": []
+    },
+    "malformed.eml": {
+      "expected": [],
+      "expected_null": [],
+      "excluded": []
+    }
+  }
+}

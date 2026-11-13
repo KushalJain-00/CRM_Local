@@ -1,0 +1,8 @@
+From: Billing Desk <billing@iota.com>
+Reply-To: Invoice Bot <invoices@iota.com>
+To: Client <client@kexample.com>
+Subject: Payment received
+Date: Tue, 10 Nov 2026 09:00:00 +0530
+Content-Type: text/plain; charset=utf-8
+
+Your invoice has been received.

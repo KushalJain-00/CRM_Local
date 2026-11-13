@@ -1962,7 +1962,15 @@ async function savePrompt(kind) {
         renderPrompts();
         toast(`${detail.title} saved (${res.chars} chars).`, { type: 'success' });
     } catch (e) {
-        showBanner('settingsBanner', 'error', `${kind} prompt was not saved`, e.message);
+        let detail = e.message || 'Unknown error';
+        const m = detail.match(/^API \d+: (\{.*\})$/s);
+        if (m) {
+            try {
+                const body = JSON.parse(m[1]);
+                if (body && typeof body.detail === 'string') detail = body.detail;
+            } catch (_) { /* keep raw message */ }
+        }
+        showBanner('settingsBanner', 'error', `${kind === 'eml' ? 'Email & EML' : 'Contact'} prompt was not saved`, detail);
     }
 }
 

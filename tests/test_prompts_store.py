@@ -42,7 +42,7 @@ def test_text_falls_back_to_default_without_edit(data_dir):
 
 def test_save_persists_only_that_kind(data_dir):
     assert store.save("eml", store.default_text("eml").replace(
-        "HOW TO READ THE EMAIL", "HOW TO READ THE EMAIL (edited)"))
+        "WHO IS THE CONTACT", "WHO IS THE CONTACT (edited)"))
     prompts = _stored_prompts(_cfg_path(data_dir))
     assert set(prompts) == {"eml"}  # saving one kind never creates the other
     assert "(edited)" in prompts["eml"]["text"]
@@ -75,9 +75,13 @@ def test_validation_rejects_missing_contract_markers(data_dir):
     ok, why = store.validator("contact", bad_contact)
     assert not ok and "schema_version" in why and "field_evidence" in why
 
+    # MASTER alone now satisfies the markers (evidence keys documented in it);
+    # the composed default must too.
     ok, why = store.validator("contact", MASTER_SYSTEM_PROMPT)
-    assert not ok  # dogfooding: MASTER alone lacks contract words; default adds them
+    assert ok and why == ""
     ok, why = store.validator("contact", store.default_text("contact"))
+    assert ok and why == ""
+    ok, why = store.validator("eml", store.default_text("eml"))
     assert ok and why == ""
 
 

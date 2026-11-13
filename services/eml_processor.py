@@ -169,9 +169,17 @@ def parse_eml_bytes(raw: bytes, file_name: str) -> ParsedEml:
     )
 
 def extract_local_fields(parsed: ParsedEml) -> dict:
-    zone = parsed.signature_block or parsed.body_text
+    sig = parsed.signature_block or None
+    zone = sig or parsed.body_text
     fields = {k: None for k in FIELD_KEYS}
-    em = EMAIL_RE.search(zone) or EMAIL_RE.search(parsed.body_text) or EMAIL_RE.search(parsed.sender_email or "")
+    if sig:
+        # Signature evidence wins; fall back to the MIME From identity when
+        # the signature carries no address.
+        em = EMAIL_RE.search(sig) or (EMAIL_RE.search(parsed.sender_email) if parsed.sender_email else None)
+    else:
+        # No signature: deterministic MIME headers are authoritative — never a
+        # body-mentioned third party's address.
+        em = (EMAIL_RE.search(parsed.sender_email) if parsed.sender_email else None) or EMAIL_RE.search(parsed.body_text or "")
     if em:
         fields["email"] = em.group(0).lower()
     phones = PHONE_RE.findall(zone) or PHONE_RE.findall(parsed.body_text)
