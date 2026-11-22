@@ -7,10 +7,10 @@ rem One-shot build: dist\CRM_Local.exe (+ CRM_Local-Setup.exe if Inno Setup is i
 rem CI builds the same artifacts on every push; this is the local path.
 
 where py >nul 2>&1
-if %errorlevel% equ 0 (set "PY=py -3") else (set "PY=python")
+if %errorlevel% equ 0 (set "PY=py -3.12") else (set "PY=python")
 
 echo   Installing build dependencies...
-%PY% -m pip install -q pyinstaller==6.11.1 setuptools backports.tarfile -r requirements.txt
+%PY% -m pip install -q pyinstaller==6.11.1 setuptools backports.tarfile -r requirements-dev.txt
 if errorlevel 1 (
     echo   Dependency install failed.
     pause
@@ -18,7 +18,7 @@ if errorlevel 1 (
 )
 
 echo   Running tests...
-%PY% -m pytest -q
+%PY% -m pytest tests/ -q
 if errorlevel 1 (
     echo   Tests failed. Fix them before shipping.
     pause
@@ -46,6 +46,7 @@ if defined ISCC (
     "%ISCC%" CRM_Local.iss
     if errorlevel 1 (
         echo   Inno Setup compile failed.
+        exit /b 1
     ) else (
         echo   Built: dist\CRM_Local-Setup.exe
     )

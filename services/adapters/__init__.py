@@ -29,6 +29,7 @@ class NormalizedContact:
     source_sheet: str | None = None
     extraction_run_id: int | None = None
     field_origin: dict | None = None
+    field_evidence: dict | None = None
     confidence: float = 0.0
     to_emails: str | None = None
     cc_emails: str | None = None
@@ -47,6 +48,7 @@ class ExtractionResult:
     # Table adapters stash the parsed table so the AI gap-fill stage can chunk
     # the same rows without re-reading/re-parsing the file.
     table: dict | None = None
+    error: str | None = None
 
 # crm-extraction.v1 / merged FIELD_KEYS → normalized-contact boundary.
 # One table, one place; every producer of contacts flows through it.
@@ -66,6 +68,7 @@ _CONTACT_MAP = (
 _MAGIC = {
     "xls": [b"\xd0\xcf\x11\xe0", b"\x09\x08\x08\x00"],
     "pdf": [b"%PDF"],
+    "xlsx": [b"PK\x03\x04"],
 }
 
 def check_signature(file_path: str, ext: str) -> None:

@@ -1,6 +1,6 @@
 # services/adapters/xlsx.py — XLSX extraction adapter
 """XLSX → normalized contacts via the shared table mapper (parse.py)."""
-from . import ExtractionResult
+from . import ExtractionResult, check_signature
 from ._table import contacts_from_table
 
 
@@ -12,9 +12,10 @@ class XlsxAdapter:
 
     async def extract(self, file_path: str) -> ExtractionResult:
         try:
+            check_signature(file_path, "xlsx")
             from services import parse
             with open(file_path, "rb") as f:
                 table = parse.parse_xlsx(f.read())
             return contacts_from_table(file_path, table, "xlsx")
         except Exception as e:
-            return ExtractionResult(contacts=[], warnings=[str(e)], adapter="xlsx", local_only=True)
+            return ExtractionResult(contacts=[], warnings=[str(e)], error=str(e), adapter="xlsx", local_only=True)

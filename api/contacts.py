@@ -2,9 +2,12 @@
 # CRUD only; file intake writes via staging approval, D-007).
 import logging
 import sqlite3
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
+
+from export import contacts_to_xlsx
 from pydantic import BaseModel
 
 import db
@@ -37,29 +40,61 @@ def _live_clause(con) -> str:
     return "deleted_at IS NULL" if _has_deleted_at(con) else "1=1"
 
 
+ContactFilter = Literal["", "has_email", "has_phone", "no_company"]
+_FILTERS = {
+    "": "1=1",
+    "has_email": "trim(coalesce(email_primary, '')) <> ''",
+    "has_phone": "trim(coalesce(phone_primary, '')) <> ''",
+    "no_company": "trim(coalesce(company, '')) = ''",
+}
+_MAX_EXPORT_ROWS = 100_000
+
+
+def _contact_query(con, q, filter, sort, direction):
+    if sort not in _SORT_ALLOWLIST:
+        raise HTTPException(422, f"sort must be one of {sorted(_SORT_ALLOWLIST)}")
+    where = f"({_live_clause(con)}) AND ({_FILTERS[filter]})"
+    params = []
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        where += " AND (name LIKE ? OR email_primary LIKE ? OR phone_primary LIKE ? OR company LIKE ?)"
+        params.extend([like, like, like, like])
+    order = f"{sort} {direction}, id {direction}"
+    return where, params, order
+
+
+def _email_sources(con, where, params, *, limit=-1):
+    has_staging = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'staged_contacts'"
+    ).fetchone()
+    if not has_staging:
+        return []
+    rows = con.execute(
+        """SELECT crm_contact_id, id AS staged_contact_id, source_email_id, source_file,
+                  dedup_status, pushed_to_crm, created_at, to_emails, cc_emails, bcc_emails,
+                  phone_secondary AS source_secondary_phones
+           FROM staged_contacts
+           WHERE source_type = 'eml' AND crm_contact_id IN ("""
+        + where + ") ORDER BY id DESC LIMIT ?", [*params, limit],
+    )
+    return [dict(row) for row in rows]
+
+
 @router.get("/contacts")
 async def list_contacts(
     page: int = Query(1, ge=1),
     size: int = Query(_DEFAULT_SIZE, ge=1, le=_MAX_SIZE),
     q: Optional[str] = None,
     sort: str = Query("id"),
-    dir: str = Query("desc"),
+    dir: Literal["asc", "desc"] = Query("desc"),
+    filter: ContactFilter = Query(""),
 ):
-    if sort not in _SORT_ALLOWLIST:
-        raise HTTPException(422, f"sort must be one of {sorted(_SORT_ALLOWLIST)}")
-    if dir not in ("asc", "desc"):
-        raise HTTPException(422, "dir must be 'asc' or 'desc'")
     con = db.connect()
     try:
-        live = _live_clause(con)
-        where, params = f"({live})", []
-        if q and q.strip():
-            like = f"%{q.strip()}%"
-            where += " AND (name LIKE ? OR email_primary LIKE ? OR phone_primary LIKE ? OR company LIKE ?)"
-            params.extend([like, like, like, like])
+        where, params, order = _contact_query(con, q, filter, sort, dir)
         total = con.execute(f"SELECT count(*) FROM contacts WHERE {where}", params).fetchone()[0]
         rows = con.execute(
-            f"SELECT * FROM contacts WHERE {where} ORDER BY {sort} {dir.upper()}, id {dir.upper()}"
+            f"SELECT * FROM contacts WHERE {where} ORDER BY {order}"
             " LIMIT ? OFFSET ?",
             params + [size, (page - 1) * size],
         ).fetchall()
@@ -71,6 +106,35 @@ async def list_contacts(
         con.close()
 
 
+@router.get("/contacts/export")
+def export_contacts(
+    q: str | None = None,
+    filter: ContactFilter = "",
+    sort: str = "id",
+    dir: Literal["asc", "desc"] = "desc",
+):
+    con = db.connect()
+    try:
+        where, params, order = _contact_query(con, q, filter, sort, dir)
+        con.execute("BEGIN")
+        total = con.execute(f"SELECT count(*) FROM contacts WHERE {where}", params).fetchone()[0]
+        if total > _MAX_EXPORT_ROWS:
+            raise HTTPException(422, "Refine the filter to export at most 100,000 contacts")
+        rows = con.execute(
+            f"SELECT * FROM contacts WHERE {where} ORDER BY {order}", params
+        ).fetchall()
+        sources = _email_sources(con, f"SELECT id FROM contacts WHERE {where}", params, limit=_MAX_EXPORT_ROWS + 1)
+        if len(sources) > _MAX_EXPORT_ROWS:
+            raise HTTPException(422, "Refine the filter to export at most 100,000 email sources")
+    finally:
+        con.close()
+    return Response(
+        contacts_to_xlsx([dict(row) for row in rows], email_sources=sources),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="contacts.xlsx"'},
+    )
+
+
 @router.get("/contacts/{contact_id}")
 async def get_contact(contact_id: int):
     con = db.connect()
@@ -80,7 +144,8 @@ async def get_contact(contact_id: int):
             f"SELECT * FROM contacts WHERE id = ? AND {live}", (contact_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "contact not found")
-        return _public(row)
+        return {**_public(row),
+                "email_sources": _email_sources(con, "SELECT ?", (contact_id,))}
     finally:
         con.close()
 

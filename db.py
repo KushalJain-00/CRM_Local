@@ -1,4 +1,5 @@
 # db.py — Unified SQLite store for CRM_Local (single database, all tables).
+from contextlib import closing
 import hashlib
 import json
 
@@ -27,34 +28,21 @@ def connect(which: str = "crm") -> sqlite3.Connection:
     con.execute("PRAGMA foreign_keys=ON")
     return con
 
-def init() -> None:
-    """Initialize all tables in the unified database."""
-    con = connect("crm")
-    # Ensure existing tables have all columns before creating new ones
-    _ensure_columns(con, "contacts", [
-        ("company_id", "INTEGER"), ("email_secondary", "TEXT"), ("phone_secondary", "TEXT"),
-        ("phone_country", "TEXT DEFAULT 'IN'"), ("whatsapp", "TEXT"), ("position", "TEXT"),
-        ("files", "TEXT"), ("products_misc", "TEXT"), ("source_file", "TEXT"),
-        ("source_row", "INTEGER"), ("extraction_run_id", "INTEGER"), ("field_origin", "TEXT"),
-        ("email_key", "TEXT"), ("phone_key", "TEXT"), ("created_at", "TEXT"), ("updated_at", "TEXT"),
-    ])
-    _ensure_columns(con, "companies", [
-        ("address", "TEXT"), ("pincode", "TEXT"), ("website", "TEXT"),
-        ("industry", "TEXT"), ("product", "TEXT"), ("created_at", "TEXT"), ("updated_at", "TEXT"),
-    ])
-    con.commit()
-    # Now create all tables (IF NOT EXISTS)
-    con.executescript(_SCHEMA_UNIFIED)
-    con.commit()
-    # Run data migration from old eml.db
-    _migrate(con)
-    con.commit()
-    # Staged-contact migration train (D-030 Phase 1). The canonical live DB is
-    # gated inside run_migrations: it is applied only by the explicit gated
-    # step (CRM_APPLY_MIGRATIONS=1 / force=True), never by a stray app start.
-    run_migrations(con)
-    con.commit()
-    con.close()
+def init() -> bool:
+    """Initialize the database and report whether its schema is ready."""
+    with closing(connect("crm")) as con:
+        if _migration_blocked(con):
+            run_migrations(con)
+        else:
+            with con:
+                con.execute("BEGIN IMMEDIATE")
+                _migrate(con)
+            run_migrations(con)
+        if not _table_cols(con, "_migration_log"):
+            return False
+        applied = {row[0] for row in con.execute("SELECT version FROM _migration_log")}
+        return _MIGRATIONS.keys() <= applied
+
 
 _SCHEMA_UNIFIED = """
 -- CRM tables
@@ -171,10 +159,10 @@ CREATE TABLE IF NOT EXISTS _migration_log (
 """
 
 def _migrate(con: sqlite3.Connection) -> None:
-    """Run idempotent migrations and data migration from old eml.db."""
-    # Migration 1: ensure all columns exist (for existing crm.db)
+    """Prepare the baseline schema and copy a separate legacy email database."""
+    # Ensure columns used by baseline indexes exist before creating the indexes.
     _ensure_columns(con, "contacts", [
-        ("whatsapp", "TEXT"), ("products_misc", "TEXT"), ("source_file", "TEXT"),
+        ("company_id", "INTEGER"), ("whatsapp", "TEXT"), ("products_misc", "TEXT"), ("source_file", "TEXT"),
         ("source_row", "INTEGER"), ("extraction_run_id", "INTEGER"),
         ("field_origin", "TEXT"), ("email_key", "TEXT"), ("phone_key", "TEXT"),
         ("email_secondary", "TEXT"), ("phone_secondary", "TEXT"),
@@ -191,101 +179,71 @@ def _migrate(con: sqlite3.Connection) -> None:
         ("crm_contact_id", "INTEGER"),
     ])
 
-    # Migration 2: migrate data from old eml.db if it exists
-    _migrate_eml_data(con)
-
-    # Record migration
-    try:
-        con.execute("INSERT OR IGNORE INTO _migration_log (version, name, applied_at) VALUES (1, 'unified_schema', datetime('now'))")
-    except Exception:
-        pass
+    statement = ""
+    for line in _SCHEMA_UNIFIED.splitlines(keepends=True):
+        if line.lstrip().startswith("--") or not line.strip():
+            continue
+        statement += line
+        if sqlite3.complete_statement(statement):
+            con.execute(statement)
+            statement = ""
+    installed = con.execute("SELECT 1 FROM _migration_log WHERE version = 1").fetchone()
+    if not installed:
+        _migrate_eml_data(con)
+        con.execute(
+            "INSERT INTO _migration_log (version, name, applied_at)"
+            " VALUES (1, 'unified_schema', datetime('now'))"
+        )
 
 def _ensure_columns(con: sqlite3.Connection, table: str, columns: list[tuple[str, str]]) -> None:
     """Add columns to a table if they don't exist (idempotent)."""
-    try:
-        existing = {r[1] for r in con.execute(f"PRAGMA table_info({table})").fetchall()}
-    except Exception:
+    existing = _table_cols(con, table)
+    if not existing:
         return
     for col_name, col_type in columns:
         if col_name not in existing:
-            try:
-                con.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
-            except Exception:
-                pass
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
+
 
 def _migrate_eml_data(con: sqlite3.Connection) -> None:
-    """Migrate data from old eml.db into the unified DB (idempotent)."""
-    import config as _config
-    eml_path = _config.db_path("eml")
-    if not os.path.exists(eml_path):
+    """Copy the legacy EML database atomically and preserve its relationships."""
+    eml_path = config.db_path("eml")
+    if not eml_path.is_file():
         return
-    # Check if migration already done
-    try:
-        count = con.execute("SELECT count(*) FROM eml_emails").fetchone()[0]
-        if count > 0:
-            return  # Already migrated
-    except Exception:
-        return
+    if con.execute("SELECT 1 FROM eml_emails LIMIT 1").fetchone():
+        raise MigrationError("Legacy EML import needs an empty email table")
 
-    try:
-        src = sqlite3.connect(eml_path)
-        src.row_factory = sqlite3.Row
-
-        # Migrate emails
-        try:
-            rows = src.execute("SELECT * FROM emails").fetchall()
-            for r in rows:
-                con.execute("""
-                    INSERT INTO eml_emails (file_name, file_path, subject, date, sender_name, sender_email,
-                        to_emails, cc_emails, bcc_emails, body_text, has_signature, processed_at, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    r["file_name"], r["file_path"], r["subject"], r["date"],
-                    r["sender_name"], r["sender_email"], r["to_emails"],
-                    r["cc_emails"], r["bcc_emails"], r["body_text"],
-                    r["has_signature"], r["processed_at"], now_iso(),
-                ))
-        except Exception as e:
-            pass  # Table may not exist in old DB
-
-        # Migrate eml_contacts
-        try:
-            rows = src.execute("SELECT * FROM eml_contacts").fetchall()
-            for r in rows:
-                con.execute("""
-                    INSERT INTO eml_contacts (source_email_id, name, email, phone_primary, phone_secondary,
-                        company, designation, address, city, pincode, website, dedup_status, pushed_to_crm,
-                        source_file, email_key, phone_key, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    r["email_id"], r["name"], r["email_primary"], r["phone_primary"],
-                    r["phone_secondary"], r["company"], r["designation"],
-                    r["address"], r["city"], r["pincode"], r["website"],
-                    "NEW", r["pushed"] if "pushed" in r.keys() else 0, r["source_file"],
-                    normalize_email(r["email_primary"]) or None,
-                    phone_key(r["phone_primary"]), r["created_at"], r["updated_at"],
-                ))
-        except Exception as e:
-            pass
-
-        # Migrate processed_files from eml.db (merge with crm processed_files)
-        try:
-            rows = src.execute("SELECT * FROM processed_files").fetchall()
-            for r in rows:
-                con.execute("""
-                    INSERT OR IGNORE INTO processed_files (path, size, mtime, status, detail, contacts_found, processed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    r["path"], r["size"], r["mtime"], r["status"],
-                    r["detail"], r["contacts_found"], r["processed_at"],
-                ))
-        except Exception:
-            pass
-
-        src.close()
-        con.commit()
-    except Exception as e:
-        pass  # Migration is best-effort; original DBs are preserved
+    mappings = (
+        ("emails", "eml_emails", {}),
+        ("eml_contacts", "eml_contacts", {
+            "source_email_id": ("source_email_id", "email_id"),
+            "email": ("email", "email_primary"),
+            "pushed_to_crm": ("pushed_to_crm", "pushed"),
+        }),
+        ("processed_files", "processed_files", {}),
+    )
+    with closing(sqlite3.connect(eml_path.resolve().as_uri() + "?mode=ro", uri=True)) as source:
+        source.row_factory = sqlite3.Row
+        for old, new, aliases in mappings:
+            if not _table_cols(source, old):
+                continue
+            columns = sorted(_table_cols(con, new))
+            for record in source.execute(f"SELECT * FROM {old}"):
+                raw = dict(record)
+                fields = {}
+                for column in columns:
+                    candidates = aliases.get(column, (column,))
+                    for key in candidates:
+                        if key in raw:
+                            fields[column] = raw[key]
+                            break
+                if new == "eml_contacts":
+                    fields["email_key"] = normalize_email(fields.get("email")) or None
+                    fields["phone_key"] = phone_key(fields.get("phone_primary"))
+                verb = "INSERT OR IGNORE" if new == "processed_files" else "INSERT"
+                placeholders = ", ".join("?" for _ in fields)
+                con.execute(f"{verb} INTO {new} ({', '.join(fields)}) VALUES ({placeholders})",
+                            tuple(fields.values()))
 
 # ─── Staged-contact migration train (D-030, Phase 1) ─────────────────────────
 # v2 receiver cols (D-022) · v3 staging + relationship/audit tables + CHECK
@@ -510,7 +468,7 @@ def _mig_v4_backfill_staged(con: sqlite3.Connection) -> None:
             d.get("field_origin"),
             crm_id if crm_id in contact_ids else None,
             d.get("pushed_to_crm") or 0,
-            now_iso(), now_iso(),
+            d.get("created_at") or now_iso(), d.get("updated_at") or now_iso(),
         ))
     n = con.execute("SELECT COUNT(*) FROM staged_contacts WHERE source_type='eml'").fetchone()[0]
     if n != len(rows):
@@ -706,6 +664,21 @@ _register(_Migration(9, "verify_and_log", _mig_v9_verify_and_log, rollback_sql=N
 _register(_Migration(10, "drop_records_if_empty", _mig_v10_drop_records,
     rollback_sql="-- table was empty when dropped; recreate from the legacy DDL if ever needed"))
 
+def _migration_blocked(con: sqlite3.Connection) -> bool:
+    if (os.environ.get(_MIGRATION_GATE_ENV) == "1"
+            or _con_db_file(con) != _live_db_file()):
+        return False
+    if config.db_path("eml").is_file() and not _table_cols(con, "_migration_log"):
+        return True
+    tables = (
+        "contacts", "companies", "eml_emails", "eml_contacts", "processed_files",
+        "staged_contacts", "call_logs", "users", "records", "session_data", "extraction_runs",
+    )
+    return any(_table_cols(con, table) and con.execute(
+        f"SELECT 1 FROM {table} LIMIT 1"
+    ).fetchone() for table in tables)
+
+
 def run_migrations(con: sqlite3.Connection, target: int = CURRENT_MIGRATION_VERSION,
                    force: bool = False) -> list[int]:
     """Apply pending versioned migrations in order; returns the versions applied.
@@ -721,26 +694,16 @@ def run_migrations(con: sqlite3.Connection, target: int = CURRENT_MIGRATION_VERS
     so the additive train self-provisions there; the gate applies as soon as
     any contacts/emails/processed_files exist.
     """
-    con_file = _con_db_file(con)
-    if not force and os.environ.get(_MIGRATION_GATE_ENV) != "1" and con_file == _live_db_file():
-        try:
-            user_rows = con.execute(
-                "SELECT (SELECT count(*) FROM contacts) + (SELECT count(*) FROM eml_emails)"
-                " + (SELECT count(*) FROM eml_contacts) + (SELECT count(*) FROM processed_files)"
-            ).fetchone()[0]
-        except sqlite3.Error:
-            user_rows = 0
-        if user_rows > 0:
-            try:
-                have = {r[0] for r in con.execute("SELECT version FROM _migration_log")}
-            except sqlite3.Error:
-                have = set()
-            pend = [v for v in sorted(_MIGRATIONS) if v not in have and v <= target]
-            if pend:
-                sys.stderr.write(
-                    f"[db] D-030 gate: migrations {pend} pending on live DB ({con_file}); "
-                    f"apply with {_MIGRATION_GATE_ENV}=1 after the step-0 backup\n")
-            return []
+    if not force and _migration_blocked(con):
+        have = ({r[0] for r in con.execute("SELECT version FROM _migration_log")}
+                if _table_cols(con, "_migration_log") else set())
+        pending = [v for v in sorted(_MIGRATIONS) if v not in have and v <= target]
+        if pending:
+            sys.stderr.write(
+                f"[db] Migrations {pending} pending. Apply with {_MIGRATION_GATE_ENV}=1 "
+                "after backing up the database.\n"
+            )
+        return []
 
     con.execute(
         "CREATE TABLE IF NOT EXISTS _migration_log ("
@@ -837,14 +800,14 @@ def restore_database(backup, dest=None) -> str:
     os.replace(tmp_path, dest_path)
     return dest_path
 
-def insert_email(con, parsed, file_path):
+def insert_email(con, parsed, file_path, *, source_name=None):
     cur = con.execute("""
         INSERT INTO eml_emails (file_name, file_path, subject, date, sender_name, sender_email,
             receiver_name, receiver_email,
             to_emails, cc_emails, bcc_emails, body_text, has_signature, processed_at, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        os.path.basename(file_path), file_path, getattr(parsed, "subject", None),
+        source_name or os.path.basename(file_path), file_path, getattr(parsed, "subject", None),
         getattr(parsed, "date", None), getattr(parsed, "sender_name", None),
         getattr(parsed, "sender_email", None),
         getattr(parsed, "receiver_name", None), getattr(parsed, "receiver_email", None),

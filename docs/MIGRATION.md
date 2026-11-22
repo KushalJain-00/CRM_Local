@@ -21,7 +21,9 @@ for review, never silently merged.
 See **docs/BACKUP_AND_RECOVERY.md**. The migration train is additive and
 logged; on a fresh install it runs automatically. On an existing database
 with data it runs only with explicit approval (`CRM_APPLY_MIGRATIONS=1`),
-after a backup.
+after a backup. Startup keeps the existing schema intact while the gate is closed and reports that an explicit upgrade is required. If the preview kept a separate `eml.db`, retain a copy of that file alongside the CRM backup before upgrading.
+
+Approved email imports expose the contact fields and linked email metadata in the CRM profile and in the Excel export. Existing staged sources with a confirmed CRM contact link appear automatically.
 
 ## Rollback
 

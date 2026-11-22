@@ -63,7 +63,7 @@ def stage_contacts(con, contacts: list[dict], *, source_type: str, source_file: 
     is staged as NEEDS_REVIEW with the MISSING warning preserved, never dropped.
     """
     counts = {"staged": 0, "needs_review": 0, "duplicates": 0, "invalid": 0,
-              "batch_duplicates": 0}
+              "batch_duplicates": 0, "ids": []}
     seen_keys: set[tuple] = set()
     run_raw = json.dumps(raw_source_data, default=str) if raw_source_data is not None else None
     for nc in contacts:
@@ -105,7 +105,8 @@ def stage_contacts(con, contacts: list[dict], *, source_type: str, source_file: 
             evidence["row"] = d["source_row"]
         if d.get("field_origin"):
             evidence["field_origin"] = d["field_origin"]
-        con.execute(
+        evidence.update(d.get("field_evidence") or {})
+        cursor = con.execute(
             """INSERT INTO staged_contacts (
                 source_type, source_file, source_row, source_sheet, source_email_id,
                 name, email, email_secondary, phone_primary, phone_secondary,
@@ -136,6 +137,7 @@ def stage_contacts(con, contacts: list[dict], *, source_type: str, source_file: 
                 band, json.dumps(candidates) if candidates else None,
                 "NOT_IMPORTED", 0, _now(), _now(),
             ))
+        counts["ids"].append(cursor.lastrowid)
         counts["staged"] += 1
     return counts
 

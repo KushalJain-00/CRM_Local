@@ -1,7 +1,7 @@
 # api/emails.py — eml_emails listing with per-email extracted-contact counts.
 # contact_count = contacts the pipeline extracted from that email (email_staged_links).
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Query
 
@@ -25,6 +25,8 @@ async def list_emails(
     page: int = Query(1, ge=1),
     size: int = Query(_DEFAULT_SIZE, ge=1, le=_MAX_SIZE),
     q: Optional[str] = None,
+    sort: Literal["date", "subject", "sender_name", "contact_count"] = "date",
+    dir: Literal["asc", "desc"] = "desc",
 ):
     con = db.connect()
     try:
@@ -44,7 +46,7 @@ async def list_emails(
             f"SELECT e.id, e.subject, e.sender_name, e.sender_email, e.date,"
             f"       e.file_name, e.processed_at, {count_sql} AS contact_count"
             f" FROM eml_emails e WHERE {where}"
-            " ORDER BY e.date IS NULL, e.date DESC, e.id DESC LIMIT ? OFFSET ?",
+            f" ORDER BY ({sort} IS NULL), {sort} {dir}, e.id {dir} LIMIT ? OFFSET ?",
             params + [size, (page - 1) * size],
         ).fetchall()
         return {"rows": [dict(r) for r in rows], "total": total, "page": page,

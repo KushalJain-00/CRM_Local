@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 APP_NAME = "CRM_Local"
 
@@ -11,6 +12,8 @@ DEFAULTS = {
     # Ordered failover chain. Empty = local regex extraction only.
     # Entry: {provider, model, api_key, base_url, enabled}
     "chain": [],
+    "mode": "local_only",
+    "import_policy": "review_first",
     "watch": False,
     "watch_interval": 30,
     "autostart": False,
@@ -66,8 +69,12 @@ def load() -> dict:
         except Exception:
             # A corrupt config must not brick the app; fall back to defaults.
             pass
-    if not isinstance(cfg.get("chain"), list):
-        cfg["chain"] = []
+    if cfg.get("mode") not in ("local_only", "ai_enrichment"):
+        cfg["mode"] = "local_only"
+    if cfg.get("import_policy") not in ("review_first", "always_stage", "smart_import"):
+        cfg["import_policy"] = "review_first"
+    chain = cfg.get("chain")
+    cfg["chain"] = [entry for entry in chain if isinstance(entry, dict)] if isinstance(chain, list) else []
     return cfg
 
 
@@ -90,9 +97,18 @@ def lock_down() -> None:
 
 
 def save(cfg: dict) -> None:
-    p = config_path()
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(cfg, indent=2), "utf-8")
-    _private(tmp)  # chmod before replace so the file is never world-readable
-    os.replace(tmp, p)
-    _private(p)
+    path = config_path()
+    with NamedTemporaryFile(mode="w", encoding="utf-8", prefix="config-", suffix=".tmp",
+                            dir=path.parent, delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
+            json.dump(cfg, stream, indent=2)
+        except Exception:
+            stream.close()
+            temporary.unlink(missing_ok=True)
+            raise
+    try:
+        os.replace(temporary, path)
+        _private(path)
+    finally:
+        temporary.unlink(missing_ok=True)

@@ -271,6 +271,10 @@ def test_staged_reject_and_dismiss_block_approval(data_dir):
 
     assert client.post(f"/api/staged-contacts/{sid_r}/reject").status_code == 200
     assert client.post(f"/api/staged-contacts/{sid_d}/dismiss").status_code == 200
+    for closed in (sid_r, sid_d):
+        assert client.post(f"/api/staged-contacts/{closed}/approve").status_code == 409
+        assert client.post(f"/api/staged-contacts/{closed}/merge").status_code == 409
+
     assert client.post(f"/api/staged-contacts/{sid_r}/reject").status_code in (200, 409)
     assert client.post("/api/staged-contacts/999999/reject").status_code == 404
     assert client.post("/api/staged-contacts/999999/dismiss").status_code == 404

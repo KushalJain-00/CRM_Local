@@ -6,6 +6,7 @@ import llm
 from services.chunking import build_doc_chunks, merge_extraction
 from services.contract import validate_extraction_result
 from services.prompts import store as prompt_store
+from services.prompts.contact_extraction import SOURCE_EXTENSIONS
 
 def ai_contacts_to_staged(c: dict) -> dict:
     phone2 = c.get("phone_secondary")
@@ -22,6 +23,10 @@ def ai_contacts_to_staged(c: dict) -> dict:
         "city": c.get("city"),
         "pincode": c.get("pincode"),
         "website": c.get("website"),
+        "field_evidence": {
+            {"company_name": "company", "position": "designation"}.get(key, key): value
+            for key, value in (c.get("field_evidence") or {}).items()
+        },
         "field_origin": {"source": "ai"},
         "confidence": {"high": 0.9, "medium": 0.6, "low": 0.3}.get(
             str(c.get("confidence") or "low").lower(), 0.3),
@@ -41,10 +46,15 @@ async def assist_document(table: dict, *, name: str, chain: list, cfg: dict,
                               layer1={"mapped": table.get("mapped"),
                                       "confidence": table.get("confidence")})
     results, failed = [], []
+    system = prompt_store.text("contact") + "\n" + SOURCE_EXTENSIONS[source_type]
+
+    def valid(payload):
+        return validate_extraction_result(payload, source_type)[0] is not None
+
     for n, chunk in enumerate(chunks, start=1):
         payload, label = await llm.extract(
-            chain, chunk, system=prompt_store.text("contact"),
-            reliability=cfg.get("reliability"))
+            chain, chunk, system=system,
+            reliability=cfg.get("reliability"), validate_output=valid)
         if payload is None:
             failed.append(f"chunk {n}: {label}")
             notes.append(f"chunk {n}: AI unavailable ({label})")

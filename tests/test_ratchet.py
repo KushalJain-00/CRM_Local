@@ -113,16 +113,13 @@ def test_eml_chain_intake_runs_without_nameerror(data_dir, tmp_path):
     assert res["results"][0]["status"] == "OK"
 
 
-# --- BUG-SEC-06: magic-bytes gate covers only .xls/.pdf ---------------------
-@pytest.mark.xfail(
-    reason="BUG-SEC-06: _MAGIC only validates .xls/.pdf (intake.py:21-24) — a non-zip .xlsx passes the content gate",
-    strict=True,
-)
+# --- BUG-SEC-06: reject corrupt workbooks rather than reporting success ---
 def test_xlsx_magic_bytes_validated(data_dir, tmp_path):
     fake = tmp_path / "fake.xlsx"
     fake.write_bytes(b"not a zip at all")
     res = asyncio.run(intake.universal_intake([str(fake)]))
-    assert "does not match" in str(res["results"][0])
+    assert res["results"][0]["status"] == "ERROR"
+    assert "does not match" in res["results"][0]["error"]
 
 
 # --- BUG-SEC-09: config.json written world-readable ------------------------

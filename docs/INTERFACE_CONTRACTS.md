@@ -159,7 +159,7 @@ D-010: routes move into an `api/` package (reference pattern); the same change u
 | `api/jobs.py` | `GET /api/jobs`, `GET /api/jobs/{job_id}`, `POST /api/jobs/{job_id}/cancel` | `app.py:148-157` |
 | `api/staging.py` | all `/api/staged*` (Review Queue) | net-new |
 | `api/history.py` | `GET /api/history`, `POST /api/history/{file_id}/reprocess` | net-new (P-12) |
-| `api/contacts.py` | `/api/contacts*` incl. sub-resources, bulk, undo | `app.py:175-211` |
+| `api/contacts.py` | `/api/contacts*` incl. filtered XLSX export and linked email sources | `app.py:175-211` |
 | `api/companies.py` | `/api/companies*` incl. merge | net-new (P-8) |
 | `api/emails.py` | `GET /api/emails`, `GET /api/emails/{id}` | net-new (P-10) |
 | `api/calls.py` | `/api/calls*`, `/api/follow-ups*` | net-new (P-11) |

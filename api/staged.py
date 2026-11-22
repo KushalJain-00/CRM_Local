@@ -4,9 +4,11 @@ from fastapi import APIRouter, HTTPException, Query
 
 import logging
 import math
-from datetime import datetime
+from contextlib import closing
+
 import db
-from services.keys import normalize_email, phone_key, normalize_name, record_keys
+from services.approval import approve_ids
+from services.keys import record_keys
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +122,7 @@ async def list_staged_contacts(
     finally:
         con.close()
 
-@router.get("/staged-contacts/{staged_id}")
+@router.get("/staged-contacts/{staged_id:int}")
 async def get_staged_contact(staged_id: int):
     """Get a single staged contact by ID."""
     con = db.connect()
@@ -135,129 +137,20 @@ async def get_staged_contact(staged_id: int):
 
 # ── Approval core (shared by per-id, bulk and bulk-action endpoints) ────────
 
-_CONTACT_FIELD_MAP = {
-    "name": "name", "email_secondary": "email_secondary",
-    "phone_primary": "phone_primary", "phone_secondary": "phone_secondary",
-    "company": "company", "designation": "designation",
-    "address": "address", "city": "city", "pincode": "pincode",
-    "website": "website", "whatsapp": "whatsapp",
-    "position": "position",
-}
-
-def _canon_keys(sc) -> dict:
-    """Dedup keys for a new canonical contact, always from the authoritative
-    normalizers — identical to what staged rows were written with."""
-    return record_keys(dict(sc))
-
-# staged/canonical column → its dedup-key column
-_KEY_BY_FIELD = {"name": "name_key", "phone_primary": "phone_key",
-                 "company": "company_key", "website": "website_key"}
-
-
-def _enrich_existing(con, existing_id: int, sc) -> None:
-    """Local-wins merge: only fill fields that are empty in the canonical row.
-
-    Key-bearing columns are recomputed after filling so canonical rows never
-    carry NULL keys for populated values."""
-    for staged_col, canon_col in _CONTACT_FIELD_MAP.items():
-        val = sc[staged_col] if staged_col in sc.keys() else None
-        if val is None:
-            continue
-        existing_val = con.execute(
-            f"SELECT {canon_col} FROM contacts WHERE id = ?", (existing_id,)).fetchone()[0]
-        if existing_val == "" or existing_val is None:
-            con.execute(f"UPDATE contacts SET {canon_col} = ? WHERE id = ?", (val, existing_id))
-    # Self-heal: canonical rows never carry NULL keys for populated values.
-    row = con.execute(
-        "SELECT name, phone_primary, company, website FROM contacts WHERE id = ?",
-        (existing_id,)).fetchone()
-    keys = record_keys({"name": row[0], "phone_primary": row[1],
-                        "company": row[2], "website": row[3]})
-    con.execute(
-        "UPDATE contacts SET name_key = ?, phone_key = ?, company_key = ?, website_key = ?"
-        " WHERE id = ?",
-        (keys["name_key"], keys["phone_key"], keys["company_key"], keys["website_key"],
-         existing_id))
-
-def _find_contact_by_identity(con, email, phone):
-    """Shared identity lookup for approval/merge. Email matches
-    case/space-insensitively (legacy rows may predate email_key); phone matches
-    through the authoritative key."""
-    existing = None
-    e = normalize_email(email)
-    if e:
-        existing = con.execute(
-            "SELECT id FROM contacts WHERE email_primary IS NOT NULL AND lower(email_primary) = ?"
-            " ORDER BY id LIMIT 1", (e,)).fetchone()
-    if existing is None:
-        pk = phone_key(phone)
-        if pk:
-            existing = con.execute(
-                "SELECT id FROM contacts WHERE phone_key = ? ORDER BY id LIMIT 1",
-                (pk,)).fetchone()
-    return existing
-
-
-def _insert_contact(con, sc) -> int:
-    keys = _canon_keys(sc)
-    now = datetime.utcnow().isoformat()
-    cur = con.execute(
-        """INSERT INTO contacts (
-            name, email_primary, email_secondary, phone_primary, phone_secondary,
-            company, designation, address, city, pincode, website, whatsapp,
-            position, files, email_key, phone_key, name_key, company_key,
-            website_key, source_file, source_row, extraction_run_id, field_origin,
-            created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            sc["name"], sc["email"], sc["email_secondary"], sc["phone_primary"],
-            sc["phone_secondary"], sc["company"], sc["designation"], sc["address"],
-            sc["city"], sc["pincode"], sc["website"], sc["whatsapp"],
-            sc["position"], sc["files"], keys["email_key"], keys["phone_key"],
-            keys["name_key"], keys["company_key"], keys["website_key"],
-            sc["source_file"], sc["source_row"], sc["extraction_run_id"],
-            # contacts.field_origin ← staged.field_evidence: the v4 backfill copies
-            # eml_contacts.field_origin (per-field "ai"/"local" JSON) into field_evidence;
-            # for native-staged rows this carries whatever provenance the adapter had.
-            sc["field_evidence"], now, now,
-        ),
-    )
-    return int(cur.lastrowid)
-
-def _approve_ids(con, staged_ids: List[int]) -> dict:
-    """Approve staged rows into canonical contacts. Returns per-row outcomes."""
-    approved = already = failed = 0
-    for staged_id in staged_ids:
-        sc = con.execute("SELECT * FROM staged_contacts WHERE id = ?", (staged_id,)).fetchone()
-        if sc is None:
-            failed += 1
-            continue
-        if sc["review_status"] == "APPROVED":
-            already += 1  # replay-safe: never double-commit
-            continue
-        existing = _find_contact_by_identity(con, sc["email"], sc["phone_primary"])
-
-        if existing:
-            _enrich_existing(con, existing["id"], sc)
-            contact_id = existing["id"]
-            import_status = "EXISTING_CONTACT_ENRICHED"
-        else:
-            contact_id = _insert_contact(con, sc)
-            import_status = "NEW_CONTACT_CREATED"
-
-        now = datetime.utcnow().isoformat()
-        con.execute(
-            "UPDATE staged_contacts SET review_status = 'APPROVED', import_status = ?,"
-            " crm_contact_id = ?, pushed_to_crm = 1, reviewed_at = ?, updated_at = ? WHERE id = ?",
-            (import_status, contact_id, now, now, staged_id))
-        approved += 1
-    return {"approved": approved, "already_approved": already, "failed": failed}
-
-def _approve_ids_logged(staged_ids: List[int]) -> dict:
+def _approve_ids_logged(staged_ids: List[int], *, single: bool = False) -> dict:
     con = db.connect()
     try:
         _require_staged_table(con)
-        outcome = _approve_ids(con, staged_ids)
+        con.execute("BEGIN IMMEDIATE")
+        if single:
+            row = con.execute(
+                "SELECT review_status FROM staged_contacts WHERE id = ?", (staged_ids[0],)
+            ).fetchone()
+            if row is None:
+                raise HTTPException(404, "staged contact not found")
+            if row["review_status"] in ("REJECTED", "DISMISSED"):
+                raise HTTPException(409, "contact is closed for review")
+        outcome = approve_ids(con, staged_ids)
         con.commit()
         return outcome
     except HTTPException:
@@ -292,7 +185,7 @@ async def bulk_staged_action(
         con = db.connect()
         try:
             _require_staged_table(con)
-            now = datetime.utcnow().isoformat()
+            now = db.now_iso()
             for staged_id in body.staged_ids:
                 status = "REJECTED" if body.action == "reject" else "DISMISSED"
                 import_status = "IMPORT_FAILED" if body.action == "reject" else "NOT_IMPORTED"
@@ -316,14 +209,12 @@ async def bulk_staged_action(
 @router.post("/staged-contacts/{staged_id}/approve")
 async def approve_one_staged_contact(staged_id: int):
     """Single-id approve used by the review UI (same core as the bulk endpoint)."""
-    outcome = _approve_ids_logged([staged_id])
-    if outcome["approved"] == 0 and outcome["already_approved"] == 0:
-        raise HTTPException(404, "staged contact not found")
+    outcome = _approve_ids_logged([staged_id], single=True)
     return {"ok": True, **outcome}
 
 def _decide_one(con, staged_id: int, review_status: str, import_status: str) -> bool:
     """Apply a terminal review decision; returns False when the row is missing."""
-    now = datetime.utcnow().isoformat()
+    now = db.now_iso()
     if review_status == "REJECTED":
         cur = con.execute(
             "UPDATE staged_contacts SET review_status = 'REJECTED', import_status = 'IMPORT_FAILED',"
@@ -473,62 +364,23 @@ async def check_staged_dedup(
     con = db.connect()
     try:
         _require_staged_table(con)
+        keys = record_keys({"email": email, "phone_primary": phone, "name": name})
+        live = "deleted_at IS NULL" if "deleted_at" in db._table_cols(con, "contacts") else "1=1"
         duplicate_reason = None
-
-        # Normalize email
-        if email:
-            er = normalize_email(email)
-            if er:
-                result = con.execute(
-                    "SELECT id FROM contacts WHERE email_key = ?", (er,)
-                ).fetchone()
-                if result:
-                    duplicate_reason = "email"
-
-        # Normalize phone
-        if phone:
-            d = phone_key(phone)
-            if d:
-                result = con.execute(
-                    "SELECT id FROM contacts WHERE phone_key = ?", (d,)
-                ).fetchone()
-                if result:
-                    if not duplicate_reason:
-                        duplicate_reason = "phone"
-
-        # Check name + phone
-        if name and phone:
-            nk = normalize_name(name)
-            d = phone_key(phone)
-            if d:
-                result = con.execute(
-                    "SELECT id FROM contacts WHERE name LIKE ? AND phone_key = ?",
-                    (f"%{nk}%", d)
-                ).fetchone()
-                if result:
-                    duplicate_reason = "name + phone"
-
-        # Check within staged contacts (email)
-        if email:
-            er = normalize_email(email)
-            if er:
-                result = con.execute(
-                    "SELECT COUNT(*) FROM staged_contacts WHERE email = ?", (er,)
-                ).fetchone()
-                if result[0] > 1:
-                    if not duplicate_reason:
-                        duplicate_reason = "email (within staged)"
-
-        # Check within staged contacts (phone)
-        if phone:
-            d = phone_key(phone)
-            if d:
-                result = con.execute(
-                    "SELECT COUNT(*) FROM staged_contacts WHERE phone_primary LIKE ?",
-                    (f"%{d}%",)
-                ).fetchone()
-                if result[0] > 1 and not duplicate_reason:
-                    duplicate_reason = "phone (within staged)"
+        for column, label in (("email_key", "email"), ("phone_key", "phone")):
+            value = keys[column]
+            if not value:
+                continue
+            if con.execute(
+                f"SELECT 1 FROM contacts WHERE {live} AND {column} = ? LIMIT 1", (value,)
+            ).fetchone():
+                duplicate_reason = label
+                break
+            if con.execute(
+                f"SELECT 1 FROM staged_contacts WHERE {column} = ? LIMIT 1 OFFSET 1", (value,)
+            ).fetchone():
+                duplicate_reason = f"{label} (within staged)"
+                break
 
         return {
             "is_duplicate": duplicate_reason is not None,
@@ -542,36 +394,12 @@ async def merge_staged_contact(
     staged_id: int,
 ):
     """Merge a staged contact with existing CRM contact (local-wins semantics)."""
-    con = db.connect()
-    try:
-        _require_staged_table(con)
-        sc = con.execute("SELECT * FROM staged_contacts WHERE id = ?", (staged_id,)).fetchone()
-        if sc is None:
-            raise HTTPException(404, "Staged contact not found")
-
-        existing = _find_contact_by_identity(con, sc["email"], sc["phone_primary"])
-        now = datetime.utcnow().isoformat()
-
-        if existing:
-            _enrich_existing(con, existing["id"], sc)
-            contact_id = existing["id"]
-            import_status = "EXISTING_CONTACT_ENRICHED"
-        else:
-            contact_id = _insert_contact(con, sc)
-            import_status = "NEW_CONTACT_CREATED"
-
-        con.execute(
-            "UPDATE staged_contacts SET review_status = 'APPROVED', import_status = ?,"
-            " crm_contact_id = ?, pushed_to_crm = 1, reviewed_at = ?, updated_at = ? WHERE id = ?",
-            (import_status, contact_id, now, now, staged_id))
-        con.commit()
-        con.close()
-        return {"ok": True, "merged": existing is not None, "new": existing is None}
-    except HTTPException:
-        con.close()
-        raise
-    except Exception:
-        con.rollback()
-        con.close()
-        logger.exception("merge failed for staged id=%s", staged_id)
-        raise HTTPException(500, "could not merge staged contact")
+    outcome = _approve_ids_logged([staged_id], single=True)
+    if outcome["already_approved"]:
+        return {"ok": True, "merged": False, "new": False, "already_approved": True}
+    with closing(db.connect()) as con:
+        status = con.execute(
+            "SELECT import_status FROM staged_contacts WHERE id = ?", (staged_id,)
+        ).fetchone()[0]
+    return {"ok": True, "merged": status == "EXISTING_CONTACT_ENRICHED",
+            "new": status == "NEW_CONTACT_CREATED"}

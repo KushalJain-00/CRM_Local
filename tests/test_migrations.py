@@ -13,6 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import config  # noqa: E402
 import db  # noqa: E402
 
 
@@ -461,5 +462,25 @@ def test_insert_email_persists_receiver_fields(data_dir):
         row = con.execute(
             "SELECT receiver_name, receiver_email FROM eml_emails WHERE id=?", (eid,)).fetchone()
         assert (row[0], row[1]) == ("R", "r@x.com")
+    finally:
+        con.close()
+
+
+def test_startup_gates_baseline_and_versioned_upgrade(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "_default_data_dir", lambda: tmp_path)
+    monkeypatch.delenv("CRM_APPLY_MIGRATIONS", raising=False)
+    con = build_legacy_db(tmp_path / "crm.db")
+    try:
+        before = con.execute(
+            "SELECT name, sql FROM sqlite_master ORDER BY name"
+        ).fetchall()
+        assert db.init() is False
+        assert con.execute(
+            "SELECT name, sql FROM sqlite_master ORDER BY name"
+        ).fetchall() == before
+        monkeypatch.setenv("CRM_APPLY_MIGRATIONS", "1")
+        assert db.init() is True
+        assert con.execute("SELECT count(*) FROM staged_contacts").fetchone()[0] == 3
     finally:
         con.close()

@@ -1,6 +1,6 @@
 # api/settings.py — settings + providers (INTERFACE_CONTRACTS §2.1)
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 import uuid
 
 from fastapi import APIRouter, HTTPException
@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 import config
 import llm
+import pipeline
 
 RELIABILITY_FIELDS = llm.RELIABILITY_FIELDS
 RELIABILITY_DESCRIPTIONS = llm.RELIABILITY_DESCRIPTIONS
@@ -24,8 +25,8 @@ class ProviderIn(BaseModel):
     enabled: bool = True
 
 class ModeIn(BaseModel):
-    mode: str
-    import_policy: str = "review_first"
+    mode: Literal["local_only", "ai_enrichment"]
+    import_policy: Literal["review_first", "always_stage", "smart_import"] = "review_first"
 
 MASKED_KEY = "********"
 
@@ -45,7 +46,7 @@ def _mask_chain(chain: list | None) -> list:
     return masked
 
 def _mask_cfg(cfg: dict) -> dict:
-    out = dict(cfg)
+    out = {name: cfg[name] for name in config.DEFAULTS.keys() & cfg.keys()}
     out["chain"] = _mask_chain(out.get("chain"))
     return out
 
@@ -62,7 +63,22 @@ async def get_settings():
 async def update_settings(body: dict):
     import config
     cfg = config.load()
-    updates = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else body
+    updates = {key: value for key, value in body.items()
+               if key in config.DEFAULTS or key == "watch_enabled"}
+    if "watch_enabled" in updates:
+        updates.setdefault("watch", updates.pop("watch_enabled"))
+    if "watch" in updates and not isinstance(updates["watch"], bool):
+        raise HTTPException(422, "watch must be a boolean")
+    if "watch_interval" in updates:
+        interval = updates["watch_interval"]
+        if type(interval) is not int or not 10 <= interval <= 86400:
+            raise HTTPException(422, "watch_interval must be an integer from 10 to 86400")
+    if "mode" in updates or "import_policy" in updates:
+        try:
+            ModeIn(mode=updates.get("mode", cfg.get("mode", "local_only")),
+                   import_policy=updates.get("import_policy", cfg.get("import_policy", "review_first")))
+        except ValueError:
+            raise HTTPException(422, "invalid extraction mode or import policy")
     if "reliability" in updates:
         updates["reliability"] = _clamp_reliability(updates.pop("reliability") or {})
     # prompts are edited only via /api/prompts — never through this surface
@@ -70,6 +86,8 @@ async def update_settings(body: dict):
     if "chain" in updates:
         # simple merge: new values replace stored by id, keep old ones
         # first, ensure all stored entries have an 'id' (legacy compat)
+        if not isinstance(updates["chain"], list):
+            raise HTTPException(422, "chain must be a list")
         stored = cfg.get("chain") or []
         for i, e in enumerate(stored):
             if not isinstance(e, dict):
@@ -78,7 +96,7 @@ async def update_settings(body: dict):
                 e["id"] = str(i)
         by_id = {str(e["id"]): e for e in stored if isinstance(e, dict)}
         new_chain = []
-        for i, entry in enumerate(updates.get("chain") or []):
+        for entry in updates["chain"]:
             if not isinstance(entry, dict):
                 continue
             e = dict(entry)
@@ -88,15 +106,20 @@ async def update_settings(body: dict):
             if not isinstance(key, str):
                 raise HTTPException(422, "api_key must be a string")
             eid = str(e["id"]) if e.get("id") is not None else None
-            old = by_id.get(eid) if eid is not None else (stored[i] if i < len(stored) else None)
+            old = by_id.get(eid) if eid is not None else None
             if key in ("", MASKED_KEY):
                 e["api_key"] = (old or {}).get("api_key", "")
             e.pop("api_key_set", None)
             e["id"] = eid if eid is not None else ((old or {}).get("id") or uuid.uuid4().hex[:8])
             new_chain.append(e)
         updates["chain"] = new_chain
+    cfg.pop("watch_enabled", None)
     cfg.update(updates)
     config.save(cfg)
+    if updates.get("watch") is True:
+        pipeline.start_watch()
+    elif updates.get("watch") is False:
+        pipeline.stop_watch()
     return _mask_cfg(cfg)
 
 @router.get("/providers")
@@ -112,15 +135,18 @@ async def add_provider(body: ProviderIn):
     cfg = config.load()
     chain = cfg.get("chain", [])
     # assign new id
-    new_id = body.id or str(len(chain))
+    new_id = body.id or uuid.uuid4().hex[:8]
+    if any(str(entry.get("id", i)) == new_id for i, entry in enumerate(chain)):
+        raise HTTPException(409, "provider id already exists")
     entry = {
         "id": new_id,
+        "provider": body.provider or "",
         "model": body.model,
         "base_url": body.base_url,
         "enabled": body.enabled,
     }
     # write-only api_key: if provided, store it; if absent, store empty (keep)
-    if body.api_key is not None and body.api_key != "":
+    if body.api_key and body.api_key != MASKED_KEY:
         entry["api_key"] = body.api_key
     chain.append(entry)
     cfg["chain"] = chain
@@ -132,11 +158,14 @@ async def edit_provider(provider_id: str, body: ProviderIn):
     import config
     cfg = config.load()
     chain = cfg.get("chain", [])
-    for entry in chain:
-        if entry.get("id") == provider_id:
+    for index, entry in enumerate(chain):
+        if str(entry.get("id", index)) == provider_id:
             entry["model"] = body.model if body.model else entry.get("model", "")
-            entry["base_url"] = body.base_url if body.base_url else entry.get("base_url", "")
-            entry["enabled"] = body.enabled if body.enabled is not None else entry.get("enabled", True)
+            for field in ("provider", "base_url", "enabled"):
+                if field in body.model_fields_set:
+                    entry[field] = getattr(body, field)
+            if body.api_key and body.api_key != MASKED_KEY:
+                entry["api_key"] = body.api_key
             break
     else:
         raise HTTPException(404, "provider not found")
@@ -149,7 +178,7 @@ async def remove_provider(provider_id: str):
     import config
     cfg = config.load()
     chain = cfg.get("chain", [])
-    new_chain = [e for e in chain if e.get("id") != provider_id]
+    new_chain = [e for i, e in enumerate(chain) if str(e.get("id", i)) != provider_id]
     if len(new_chain) == len(chain):
         raise HTTPException(404, "provider not found")
     cfg["chain"] = new_chain
@@ -161,8 +190,8 @@ async def enable_provider(provider_id: str):
     import config
     cfg = config.load()
     chain = cfg.get("chain", [])
-    for entry in chain:
-        if entry.get("id") == provider_id:
+    for index, entry in enumerate(chain):
+        if str(entry.get("id", index)) == provider_id:
             entry["enabled"] = True
             break
     else:
@@ -176,8 +205,8 @@ async def disable_provider(provider_id: str):
     import config
     cfg = config.load()
     chain = cfg.get("chain", [])
-    for entry in chain:
-        if entry.get("id") == provider_id:
+    for index, entry in enumerate(chain):
+        if str(entry.get("id", index)) == provider_id:
             entry["enabled"] = False
             break
     else:
@@ -190,7 +219,7 @@ async def disable_provider(provider_id: str):
 async def get_mode():
     import config
     cfg = config.load()
-    return {"mode": cfg.get("mode", "review_first"), "import_policy": cfg.get("import_policy", "review_first")}
+    return {"mode": cfg.get("mode", "local_only"), "import_policy": cfg.get("import_policy", "review_first")}
 
 @router.put("/settings/mode")
 async def set_mode(body: ModeIn):
@@ -226,11 +255,11 @@ def _resolve_entry(body: dict) -> tuple[dict, bool]:
     e = dict(body or {})
     e.setdefault("provider", "")
     stored = None
-    eid = (e.get("id") or "").strip()
+    eid = str(e.get("id") or "").strip()
     if not (e.get("api_key") or "").strip() or e.get("api_key") == MASKED_KEY:
         if eid:
             stored = next((c for c in config.load().get("chain") or []
-                           if str(c.get("id")) == eid and isinstance(c, dict)), None)
+                           if isinstance(c, dict) and str(c.get("id")) == eid), None)
     if stored:
         e["api_key"] = e.get("api_key") if e.get("api_key") == MASKED_KEY else ""
         if e["api_key"] in ("", MASKED_KEY):
