@@ -59,14 +59,18 @@ jobs:
         run: |
           choco install innosetup -y
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" CRM_Local.iss
-        continue-on-error: true
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install and smoke-test on Windows
+        shell: pwsh
+        run: ./tools/smoke_windows_installer.ps1
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: CRM_Local-installer
           path: dist/CRM_Local-Setup.exe
-        continue-on-error: true
+          if-no-files-found: error
 
       - name: Build final checksums
         shell: pwsh

@@ -1,6 +1,7 @@
 # intake.py — Universal file intake for CRM_Local.
 # Upload channel: spool/limits/validation here; the extraction lifecycle
 # lives in services/extract.py (shared with the folder scan).
+import asyncio
 import os
 import re
 import logging
@@ -21,7 +22,7 @@ def _display_name(path: str) -> str:
     return _SPOOL_RE.sub("", os.path.basename(path))
 
 
-async def universal_intake(files, chain=None, options=None):
+async def universal_intake(files, chain=None, options=None, *, cfg=None, source_names=None, job=None):
     """Process a batch of mixed-format files through the unified extraction pipeline."""
     chain = chain or []
     options = options or {}
@@ -34,8 +35,11 @@ async def universal_intake(files, chain=None, options=None):
     run_id = None
     try:
         run_id = staging.open_extraction_run(con, files_processed=len(files))
-        for uf_path in files:
-            name = _display_name(uf_path)
+        con.commit()
+        for index, uf_path in enumerate(files):
+            if job is not None and job["state"] == "cancelling":
+                break
+            name = source_names[index] if source_names is not None else _display_name(uf_path)
             try:
                 # A bare filename is relative to the data directory (a client
                 # that has no full path may send one).
@@ -51,7 +55,8 @@ async def universal_intake(files, chain=None, options=None):
 
                 outcome = await process_source(
                     con, uf_path, chain=chain,
-                    extraction_run_id=run_id, source_name=name)
+                    extraction_run_id=run_id, source_name=name, cfg=cfg,
+                    policy=options.get("policy"), uploaded=source_names is not None)
 
                 if outcome.status == "OK":
                     total_contacts += outcome.staged
@@ -63,6 +68,7 @@ async def universal_intake(files, chain=None, options=None):
                         "contacts_found": outcome.contacts_found,
                         "warnings": outcome.warnings,
                         "adapter": outcome.adapter,
+                        "imported": outcome.imported,
                     })
                 else:
                     counts["error"] += 1
@@ -78,10 +84,17 @@ async def universal_intake(files, chain=None, options=None):
                 except Exception:
                     pass
 
+            finally:
+                con.commit()
+                if job is not None:
+                    job["completed"] += 1
+                    job["errors"] = counts["error"]
+            await asyncio.sleep(0)
         if run_id is not None:
             staging.close_extraction_run(
                 con, run_id, total_contacts,
-                status="completed" if counts["error"] == 0 else "completed_with_errors")
+                status=("cancelled" if job is not None and job["state"] == "cancelling"
+                        else "completed" if counts["error"] == 0 else "completed_with_errors"))
         con.commit()
     finally:
         con.close()

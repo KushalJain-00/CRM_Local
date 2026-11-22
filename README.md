@@ -30,9 +30,9 @@ Windows SmartScreen may warn about an unsigned installer. Choose **More info →
 Extraction runs in two layers:
 
 1. **Local pattern matching** (always on, no setup).
-2. **Your provider chain**, tried top to bottom. If one fails, the next takes over.
+2. **Optional AI enrichment** starts after you select it in **Settings → Processing**. The provider chain is tried in order and rejected output falls through to the next provider.
 
-Add providers in **Settings → Add provider**. Cloud APIs are the default:
+Add providers in **Settings → Add provider**. Choose a local or cloud provider:
 
 | Provider | Model example |
 |---|---|
@@ -44,11 +44,11 @@ Add providers in **Settings → Add provider**. Cloud APIs are the default:
 | Anthropic | `claude-3-5-sonnet-latest` |
 | Ollama | any local model, host default `http://localhost:11434` |
 
-Use the arrows to reorder. Leave the chain empty to use local matching only.
+Use the arrows to reorder. Local only is the default, even if you have saved providers. Review first is the default import policy.
 
 ### Watch mode
 
-While the app is open, it scans both folders on an interval (default 30 s). **Start CRM Local when Windows starts** adds a shortcut to your Startup folder — available in the installed app.
+With folder watching enabled in Settings, the app scans both folders on an interval (default 30 s). **Start CRM Local when Windows starts** adds a shortcut to your Startup folder — available in the installed app.
 
 ## Where your data lives
 
@@ -102,7 +102,7 @@ Requires Python 3.12+ on Windows.
 build_windows.bat
 ```
 
-Produces `dist\CRM_Local.exe` and, if Inno Setup 6 is installed, `dist\CRM_Local-Setup.exe`.
+Produces `dist\CRM_Local.exe` and, if Inno Setup 6 is installed, `dist\CRM_Local-Setup.exe`. Windows CI installs the generated installer into a temporary profile and checks launch, offline EML approval, Excel export, restart, and uninstall. Run the same probe from PowerShell with `./tools/smoke_windows_installer.ps1`.
 
 ### Linux/macOS for development
 

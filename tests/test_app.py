@@ -49,9 +49,14 @@ def test_contacts_invalid_which():
     assert r.status_code == 200
 
 
-def test_pick_folder():
-    r = client.post("/api/pick-folder", json={"initial": ""})
+def test_pick_folder(monkeypatch, tmp_path):
+    # The HTTP test must never block on a native dialog on a Windows runner.
+    import pipeline
+
+    monkeypatch.setattr(pipeline, "folder_picker", lambda initial: initial)
+    r = client.post("/api/pick-folder", json={"initial": str(tmp_path)})
     assert r.status_code == 200
+    assert r.json() == {"path": str(tmp_path)}
 
 
 def test_settings_get():

@@ -18,4 +18,4 @@ class PdfAdapter:
                 table = parse_pdf(f.read())
             return contacts_from_table(file_path, table, "pdf")
         except Exception as e:
-            return ExtractionResult(contacts=[], warnings=[str(e)], adapter="pdf", local_only=True)
+            return ExtractionResult(contacts=[], warnings=[str(e)], error=str(e), adapter="pdf", local_only=True)

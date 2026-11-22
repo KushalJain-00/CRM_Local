@@ -82,4 +82,4 @@ class TxtAdapter:
             return ExtractionResult(contacts=contacts, warnings=warnings,
                                     adapter="txt", local_only=True, table=table)
         except Exception as e:
-            return ExtractionResult(contacts=[], warnings=[str(e)], adapter="txt", local_only=True)
+            return ExtractionResult(contacts=[], warnings=[str(e)], error=str(e), adapter="txt", local_only=True)

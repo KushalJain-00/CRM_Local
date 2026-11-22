@@ -1,10 +1,10 @@
 from pydantic import BaseModel
 # api/companies.py — Company management (D-032)
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Query
 
 import db
-from datetime import datetime
+import math
 
 router = APIRouter()
 
@@ -24,6 +24,8 @@ class CompanyIn(BaseModel):
 @router.get("/companies")
 async def list_companies(
     q: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=500),
 ):
     """List companies with optional search."""
     con = db.connect()
@@ -40,22 +42,21 @@ async def list_companies(
 
         list_sql = f"""
             SELECT * FROM companies WHERE {where}
-            ORDER BY name LIMIT 50 OFFSET 0
+            ORDER BY name, id LIMIT ? OFFSET ?
         """
-        rows = con.execute(list_sql, params).fetchall()
+        rows = con.execute(list_sql, [*params, size, (page - 1) * size]).fetchall()
 
         companies = [dict(r) for r in rows]
         return {
             "rows": companies,
             "total": total,
-            "page": 1,
-            "pageSize": 50,
-            "totalPages": math.ceil(total / 50) if total > 0 else 0,
+            "page": page,
+            "pageSize": size,
+            "totalPages": math.ceil(total / size),
         }
     finally:
         con.close()
 
-import math
 
 @router.get("/companies/{company_id}")
 async def get_company(company_id: int):
@@ -76,8 +77,8 @@ async def create_company(
     """Create a new company."""
     con = db.connect()
     try:
-        now = datetime.utcnow().isoformat()
-        con.execute(
+        now = db.now_iso()
+        cursor = con.execute(
             """INSERT INTO companies (
                 name, address, city, pincode, website, industry, product, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -88,10 +89,8 @@ async def create_company(
         )
         con.commit()
         # Return the created company with the generated ID
-        row = con.execute("SELECT * FROM companies WHERE name = ? ORDER BY id DESC LIMIT 1", (body.name or "",)).fetchone()
-        result = dict(row) if row else {}
-        con.close()
-        return {"ok": True, "company": result}
+        row = con.execute("SELECT * FROM companies WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        return {"ok": True, "company": dict(row)}
     finally:
         con.close()
 
@@ -109,7 +108,6 @@ async def update_company(
             con.close()
             raise HTTPException(404, "Company not found")
 
-        now = datetime.utcnow().isoformat()
         update_parts = []
         update_vals = []
 
@@ -139,7 +137,8 @@ async def update_company(
             con.close()
             return {"ok": True}
 
-        update_vals.append(company_id)
+        update_parts.append("updated_at = ?")
+        update_vals.extend((db.now_iso(), company_id))
         con.execute(
             f"UPDATE companies SET {', '.join(update_parts)} WHERE id = ?",
             update_vals
@@ -154,34 +153,21 @@ async def update_company(
 async def delete_company(
     company_id: int,
 ):
-    """Delete a company (not supported - check for dependents)."""
+    """Delete a company that has no dependent contacts."""
     con = db.connect()
     try:
-        existing = con.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
+        con.execute("BEGIN IMMEDIATE")
+        existing = con.execute("SELECT name FROM companies WHERE id = ?", (company_id,)).fetchone()
         if existing is None:
-            con.close()
             raise HTTPException(404, "Company not found")
-
-        # Check for dependent contacts
         deps = con.execute(
-            "SELECT COUNT(*) FROM contacts WHERE company = ?",
-            (existing["name"],)
+            "SELECT COUNT(*) FROM contacts WHERE company_id = ? OR company = ?",
+            (company_id, existing["name"]),
         ).fetchone()[0]
-
-        con.close()
-        if deps > 0:
-            return {"ok": False, "error": f"Company has {deps} dependent contacts. Re-assign contacts first."}
-
-        con.close()
-        # Actually delete
-        con2 = db.connect()
-        con2.execute("DELETE FROM companies WHERE id = ?", (company_id,))
-        con2.commit()
-        con2.close()
+        if deps:
+            raise HTTPException(409, f"Company has {deps} dependent contacts. Re-assign contacts first.")
+        con.execute("DELETE FROM companies WHERE id = ?", (company_id,))
+        con.commit()
         return {"ok": True}
-    except HTTPException:
+    finally:
         con.close()
-        raise
-    except Exception as e:
-        con.close()
-        raise HTTPException(500, str(e))

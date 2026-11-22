@@ -5,6 +5,7 @@ from .intake import router as intake_router
 from .jobs import router as jobs_router
 from .system import router as system_router
 from .staged import router as staged_router
+from .companies import router as companies_router
 from .contacts import router as contacts_router
 from .emails import router as emails_router
 from .quality import router as quality_router
@@ -17,6 +18,7 @@ __all__ = [
     "system_router",
     "staged_router",
     "contacts_router",
+    "companies_router",
     "emails_router",
     "quality_router",
     "history_router",

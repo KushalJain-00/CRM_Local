@@ -18,4 +18,4 @@ class XlsAdapter:
                 table = legacy.parse_xls(f.read())
             return contacts_from_table(file_path, table, "xls")
         except Exception as e:
-            return ExtractionResult(contacts=[], warnings=[str(e)], adapter="xls", local_only=True)
+            return ExtractionResult(contacts=[], warnings=[str(e)], error=str(e), adapter="xls", local_only=True)

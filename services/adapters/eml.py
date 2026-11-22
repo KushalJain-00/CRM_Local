@@ -27,5 +27,5 @@ class EmlAdapter:
             return ExtractionResult(contacts=[nc], adapter="eml",
                                     local_only=True, parsed=parsed)
         except Exception as e:
-            return ExtractionResult(contacts=[], warnings=[str(e)],
+            return ExtractionResult(contacts=[], warnings=[str(e)], error=str(e),
                                     adapter="eml", local_only=True)

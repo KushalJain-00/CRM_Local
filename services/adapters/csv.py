@@ -17,4 +17,4 @@ class CsvAdapter:
                 table = parse.parse_csv(f.read())
             return contacts_from_table(file_path, table, "csv")
         except Exception as e:
-            return ExtractionResult(contacts=[], warnings=[str(e)], adapter="csv", local_only=True)
+            return ExtractionResult(contacts=[], warnings=[str(e)], error=str(e), adapter="csv", local_only=True)

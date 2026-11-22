@@ -775,7 +775,7 @@ async function retryFile(i) {
         const resp = await apiFormData('/api/intake', fd);
         const r = (resp.results && resp.results[0]) || {};
         q.status = r.status === 'OK' ? 'done' : 'failed';
-        q.error = r.error || '';
+        q.error = r.error || (r.warnings || []).join(' · ');
         q.contactsFound = r.contacts_found != null ? r.contacts_found : null;
         q.progress = 100;
     } catch (e) {
@@ -814,10 +814,10 @@ async function startExtraction() {
         const respResults = (resp && resp.results) || [];
         let okCount = 0, failCount = 0;
         valid.forEach((q, idx) => {
-            const r = respResults.find(x => (x.file || '') === q.file.name) || respResults[idx] || {};
+            const r = respResults[idx] || {};
             const ok = isOkStatus(r.status);
             q.status = ok ? 'done' : 'failed';
-            q.error = r.error || (ok ? '' : r.status || 'Extraction failed');
+            q.error = r.error || (ok ? (r.warnings || []).join(' · ') : r.status || 'Extraction failed');
             q.contactsFound = r.contacts_found != null ? r.contacts_found : null;
             q.progress = 100;
             if (ok) okCount++; else failCount++;
@@ -832,7 +832,7 @@ async function startExtraction() {
                 const ok = isOkStatus(r.status);
                 return `<div class="result-item ${ok ? 'success' : 'error'}">
                     <svg class="icon" aria-hidden="true"><use href="#${ok ? 'i-check-circle' : 'i-x-circle'}"/></svg>
-                    <span><strong>${esc(r.file || '')}</strong>: ${esc(r.status || '')} (${fmtInt(r.contacts_found || 0)} contacts)${r.error ? ' — ' + esc(r.error) : ''}</span>
+                    <span><strong>${esc(r.file || '')}</strong>: ${esc(r.status || '')} (${fmtInt(r.contacts_found || 0)} contacts)${esc([r.error, ...(r.warnings || [])].filter(Boolean).map(message => ' — ' + message).join(''))}</span>
                 </div>`;
             }).join('') +
             (resp.counts ? `<div class="result-summary">New: ${fmtInt(resp.counts.new)} · Merged: ${fmtInt(resp.counts.merged)} · Skipped: ${fmtInt(resp.counts.skipped)} · Errors: ${fmtInt(resp.counts.error)}</div>` : '') +
@@ -857,11 +857,26 @@ async function startExtraction() {
 
 // ── Contacts ────────────────────────────────────────────────────────────────
 
+function contactQuery() {
+    return new URLSearchParams({
+        q: $('#contactSearch')?.value || '',
+        filter: $('#contactFilter')?.value || '',
+        sort: contactsSort.key,
+        dir: contactsSort.dir,
+    });
+}
+
+let contactsRequest = 0;
 async function loadContacts() {
+    const request = ++contactsRequest;
     hideBanner('contactsBanner');
     skeletonRows('contactsBody', 6);
     try {
-        const data = await api('/api/contacts?page=' + S.contactsPage + '&size=' + S.contactsPageSize + '&sort=' + encodeURIComponent(contactsSort.key) + '&dir=' + contactsSort.dir);
+        const params = contactQuery();
+        params.set('page', S.contactsPage);
+        params.set('size', S.contactsPageSize);
+        const data = await api('/api/contacts?' + params);
+        if (request !== contactsRequest) return;
         S.contacts = data.rows || [];
         S.contactsTotal = data.total != null ? Number(data.total) : S.contacts.length;
         applyContactFilter();
@@ -872,6 +887,7 @@ async function loadContacts() {
         const info = document.getElementById('contactsInfo');
         if (info) info.textContent = paginationInfo(S.contactsTotal, S.contactsPage, S.contactsPageSize);
     } catch (e) {
+        if (request !== contactsRequest) return;
         showBanner('contactsBanner', 'error', 'Could not load contacts', e.message + ' — check that the local service is running.');
         document.getElementById('contactsBody').innerHTML =
             tableErrorRow(6, 'Contacts unavailable', 'The API did not answer. Press Refresh once the service is up.');
@@ -879,12 +895,7 @@ async function loadContacts() {
 }
 
 function applyContactFilter() {
-    const f = (document.getElementById('contactFilter') || {}).value || '';
-    let rows = S.contacts;
-    if (f === 'has_email') rows = rows.filter(c => c.email_primary);
-    else if (f === 'has_phone') rows = rows.filter(c => c.phone_primary);
-    else if (f === 'no_company') rows = rows.filter(c => !c.company);
-    S.contactsFiltered = rows;
+    S.contactsFiltered = S.contacts;
     renderContactsTable();
 }
 
@@ -922,27 +933,15 @@ function renderContactsTable() {
     updateBulkBar();
 }
 
-const _searchContactsDebounced = debounce(async () => { await _searchContactsNow(); }, 250);
-function searchContacts() { return _searchContactsDebounced(); }
-async function _searchContactsNow() {
-    const q = ((document.getElementById('contactSearch') || {}).value || '');
-    try {
-        const data = await api('/api/contacts?q=' + encodeURIComponent(q) + '&page=1&size=' + S.contactsPageSize + '&sort=' + encodeURIComponent(contactsSort.key) + '&dir=' + contactsSort.dir);
-        S.contacts = data.rows || [];
-        S.contactsTotal = data.total != null ? Number(data.total) : S.contacts.length;
-        S.contactsPage = 1;
-        applyContactFilter();
-        renderPagination('contactsPagination', S.contactsTotal, 1, S.contactsPageSize, (p) => { S.contactsPage = p; loadContacts(); });
-        const info = document.getElementById('contactsInfo');
-        if (info) info.textContent = paginationInfo(S.contactsTotal, 1, S.contactsPageSize);
-    } catch (e) { console.error(e); }
+const debouncedContactSearch = debounce(loadContacts, 200);
+function searchContacts() {
+    S.contactsPage = 1;
+    debouncedContactSearch();
 }
 
 function filterContacts() {
     S.contactsPage = 1;
-    applyContactFilter();
-    const info = document.getElementById('contactsInfo');
-    if (info) info.textContent = paginationInfo(S.contactsTotal, S.contactsPage, S.contactsPageSize);
+    loadContacts();
 }
 
 function sortContacts(field) {
@@ -952,7 +951,6 @@ function sortContacts(field) {
     loadContacts();
 }
 
-// One client-side comparator for the sortable tables.
 function compareValues(av, bv) {
     return typeof av === 'number' && typeof bv === 'number'
         ? av - bv
@@ -1019,8 +1017,22 @@ function changeContactsPageSize(v) {
     loadContacts();
 }
 
-function exportContacts() {
-    exportRowsCSV(S.contactsFiltered.length ? S.contactsFiltered : S.contacts, 'contacts.csv', 'contacts');
+async function exportContacts() {
+    try {
+        const response = await fetch(API_BASE + '/api/contacts/export?' + contactQuery());
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Export failed');
+        }
+        const url = URL.createObjectURL(await response.blob());
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'contacts.xlsx';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+        toast(error.message, { type: 'error' });
+    }
 }
 
 // One CSV table writer for every export button.
@@ -1139,12 +1151,40 @@ function closeDrawer() {
     setTimeout(finish, REDUCED.matches ? 0 : 240);
 }
 
+const ADDITIONAL_CONTACT_FIELDS = [
+    ['phone_secondary', 'Secondary phone'], ['designation', 'Designation'],
+    ['address', 'Address'], ['city', 'City'], ['pincode', 'Pincode'], ['website', 'Website'],
+];
+
+function contactDetailsHTML(fields, values) {
+    return fields.map(([key, label]) =>
+        `<dt>${esc(label)}</dt><dd>${esc(values[key] ?? '—')}</dd>`).join('');
+}
+
+function emailSourcesHTML(sources) {
+    if (!sources?.length) return '';
+    const fields = [
+        ['staged_contact_id', 'Staged contact ID'], ['source_email_id', 'Source email ID'],
+        ['source_file', 'Source file'], ['dedup_status', 'Dedup status'],
+        ['pushed_to_crm', 'Pushed to CRM'], ['created_at', 'Created'],
+        ['to_emails', 'To'], ['cc_emails', 'Cc'], ['bcc_emails', 'Bcc'],
+        ['source_secondary_phones', 'Secondary phones from source'],
+    ];
+    return `<div class="dsec"><h3>Email sources</h3>${sources.map((source, index) =>
+        `<details${index === 0 ? ' open' : ''}><summary>${esc(source.source_file || 'Email source')}</summary>
+        <dl class="dgrid">${contactDetailsHTML(fields, {
+            ...source, pushed_to_crm: source.pushed_to_crm ? 'Yes' : 'No',
+        })}</dl></details>`).join('')}</div>`;
+}
+
 function contactFormFields(c) {
     return `
         <label class="field">Name<input type="text" id="dF-name" value="${esc(c.name || '')}"></label>
         <label class="field">Email<input type="text" id="dF-email" class="mono" value="${esc(contactEmail(c))}"></label>
         <label class="field">Phone<input type="text" id="dF-phone" class="mono" value="${esc(c.phone_primary || '')}"></label>
-        <label class="field">Company<input type="text" id="dF-company" value="${esc(c.company || '')}"></label>`;
+        <label class="field">Company<input type="text" id="dF-company" value="${esc(c.company || '')}"></label>
+        ${ADDITIONAL_CONTACT_FIELDS.map(([key, label]) =>
+            `<label class="field">${label}<input type="text" id="dF-${key}" value="${esc(c[key] || '')}"></label>`).join('')}`;
 }
 
 function provenanceHTML(obj) {
@@ -1168,11 +1208,15 @@ function contactCompleteness(c) {
     return { filled, total: 4, pct: Math.round((filled / 4) * 100) };
 }
 
-function viewContactProfile(id, row) {
-    let c = row || S.contacts.find(x => x.id === id) || (S.profileContacts || []).find(x => x.id === id) || stagedContactsCache.find(x => x.id === id);
-    if (!c) { toast('Contact details are not loaded right now — open it from the Contacts list.', { type: 'info' }); return; }
+async function viewContactProfile(id) {
+    let c;
+    try {
+        c = await api('/api/contacts/' + id);
+    } catch (error) {
+        toast('Could not load contact: ' + error.message, { type: 'error' });
+        return;
+    }
     const comp = contactCompleteness(c);
-    const name = c.name || '(no name)';
     const html = `
         <div class="dsec">
             ${profileHeaderHTML(c)}
@@ -1187,8 +1231,10 @@ function viewContactProfile(id, row) {
             <dt>Phone</dt><dd class="mono">${esc(c.phone_primary || '—')}</dd>
             <dt>Company</dt><dd>${esc(c.company || '—')}</dd>
             <dt>ID</dt><dd class="mono">${esc(c.id)}</dd>
+            ${contactDetailsHTML(ADDITIONAL_CONTACT_FIELDS, c)}
         </dl></div>
         ${provenanceHTML(c)}
+        ${emailSourcesHTML(c.email_sources)}
         <div class="drawer-actions">
             <button type="button" class="btn btn-secondary btn-sm" onclick="closeDrawer(); editContact(${c.id})"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg>Edit</button>
             <button type="button" class="btn btn-danger btn-sm" onclick="closeDrawer(); deleteContact(${c.id})"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
@@ -1215,6 +1261,7 @@ function openEditDrawer({ title, sub, c, emailField, url, onSaved, savedToast })
             [emailField]: $('#dF-email').value,
             phone_primary: $('#dF-phone').value,
             company: $('#dF-company').value,
+            ...Object.fromEntries(ADDITIONAL_CONTACT_FIELDS.map(([key]) => [key, $('#dF-' + key).value])),
         };
         try {
             await api(url, {
@@ -1232,8 +1279,9 @@ function openEditDrawer({ title, sub, c, emailField, url, onSaved, savedToast })
 }
 
 async function editContact(id) {
-    const c = S.contacts.find(x => x.id === id);
-    if (!c) { toast('Contact not found in the loaded page.', { type: 'error' }); return; }
+    let c;
+    try { c = await api('/api/contacts/' + id); }
+    catch (error) { toast(error.message, { type: 'error' }); return; }
     openEditDrawer({
         title: 'Edit contact',
         sub: 'Changes are saved to your local database',
@@ -1246,10 +1294,15 @@ async function editContact(id) {
 
 // ── Emails ───────────────────────────────────────────────────────────────────
 
+let emailsRequest = 0;
 async function loadEmails() {
+    const request = ++emailsRequest;
     skeletonRows('emailsBody', 4);
     try {
-        const data = await api('/api/emails?page=' + S.emailsPage + '&size=' + S.emailsPageSize);
+        const params = new URLSearchParams({ page: S.emailsPage, size: S.emailsPageSize,
+            q: $('#emailSearch')?.value || '', sort: emailsSort.key, dir: emailsSort.dir });
+        const data = await api('/api/emails?' + params);
+        if (request !== emailsRequest) return;
         S.emails = data.rows || [];
         S.emailsTotal = data.total != null ? Number(data.total) : S.emails.length;
         renderEmailsTable();
@@ -1260,6 +1313,7 @@ async function loadEmails() {
         const info = document.getElementById('emailsInfo');
         if (info) info.textContent = paginationInfo(S.emailsTotal, S.emailsPage, S.emailsPageSize);
     } catch (e) {
+        if (request !== emailsRequest) return;
         document.getElementById('emailsBody').innerHTML = tableErrorRow(4, 'Emails unavailable', e.message);
     }
 }
@@ -1267,21 +1321,11 @@ async function loadEmails() {
 function renderEmailsTable() {
     const tbody = document.getElementById('emailsBody');
     if (!tbody) return;
-    const q = ((document.getElementById('emailSearch') || {}).value || '').toLowerCase();
-    let rows = S.emails;
-    if (q) rows = rows.filter(e =>
-        String(e.subject || '').toLowerCase().includes(q) ||
-        String(e.sender_name || '').toLowerCase().includes(q));
-    if (emailsSort.key) {
-        rows = rows.slice().sort((a, b) => {
-            const cmp = compareValues(a[emailsSort.key], b[emailsSort.key]);
-            return emailsSort.dir === 'asc' ? cmp : -cmp;
-        });
-    }
+    const rows = S.emails;
     if (!rows.length) {
         tbody.innerHTML = `<tr><td colspan="4">${emptyStateHTML({
             icon: 'i-mail',
-            title: q ? 'No emails match' : 'No emails yet',
+            title: $('#emailSearch')?.value ? 'No emails match' : 'No emails yet',
             hint: q ? 'Try a different search term.' : 'Emails appear here after you extract .eml files or mailboxes.',
             ctaLabel: q ? null : 'Go to Extract',
             ctaFn: "showView('extract')",
@@ -1296,12 +1340,17 @@ function renderEmailsTable() {
     </tr>`).join('');
 }
 
-async function searchEmails() { renderEmailsTable(); }
+const debouncedEmailSearch = debounce(loadEmails, 200);
+function searchEmails() {
+    S.emailsPage = 1;
+    debouncedEmailSearch();
+}
 
 function sortEmails(field) {
     toggleSort(emailsSort, field);
     updateSortUI('emailsTable', field, emailsSort.dir);
-    renderEmailsTable();
+    S.emailsPage = 1;
+    loadEmails();
 }
 
 function exportEmails() {
@@ -1771,7 +1820,9 @@ async function loadSettings() {
         if (settings.crm_dir !== undefined) document.getElementById('crmDir').value = settings.crm_dir || '';
         if (settings.eml_dir !== undefined) document.getElementById('emlDir').value = settings.eml_dir || '';
         if (settings.watch_interval !== undefined) document.getElementById('watchInterval').value = settings.watch_interval;
-        if (settings.watch_enabled !== undefined) document.getElementById('watchEnabled').checked = !!settings.watch_enabled;
+        $('#watchEnabled').checked = !!settings.watch;
+        $('#extractionMode').value = settings.mode || 'local_only';
+        $('#importPolicy').value = settings.import_policy || 'review_first';
         markSettingsDirty(false);
     } catch (e) {
         document.getElementById('providerChain').innerHTML = '';
@@ -2061,10 +2112,20 @@ function markSettingsDirty(dirty) {
     if (pill) pill.hidden = !settingsDirtyFlag;
 }
 
-function pickFolder(target) {
+async function pickFolder(target) {
     const input = document.getElementById(target === 'crm' ? 'crmDir' : 'emlDir');
-    if (input) input.focus();
-    toast('Type the folder path here — the native folder picker is provided by the desktop service, which this build does not expose.', { type: 'info', timeout: 5000 });
+    try {
+        const result = await api('/api/pick-folder', {
+            method: 'POST', body: JSON.stringify({ initial: input.value }),
+        });
+        if (!result.cancelled) {
+            input.value = result.path;
+            markSettingsDirty(true);
+        }
+    } catch (error) {
+        input.focus();
+        toast('Could not open the folder picker: ' + error.message, { type: 'error' });
+    }
 }
 
 async function saveSettings() {
@@ -2073,11 +2134,11 @@ async function saveSettings() {
         crm_dir: (document.getElementById('crmDir') || {}).value || '',
         eml_dir: (document.getElementById('emlDir') || {}).value || '',
         watch_interval: Number((document.getElementById('watchInterval') || {}).value) || 30,
-        watch_enabled: !!(document.getElementById('watchEnabled') || {}).checked,
+        watch: $('#watchEnabled').checked,
+        mode: $('#extractionMode').value,
+        import_policy: $('#importPolicy').value,
         reliability: reliabilityWorking || {},
     };
-    // Client preferences are safe to persist locally regardless of backend support.
-    try { localStorage.setItem('crm-settings-local', JSON.stringify(payload)); } catch (e) { /* ignore */ }
     try {
         await api('/api/settings', {
             method: 'POST',
@@ -2267,7 +2328,7 @@ function paletteBuildStatic() {
         { group: 'Actions', icon: 'i-sun', label: 'Theme: Light', type: 'Action', run: () => setTheme('light') },
         { group: 'Actions', icon: 'i-moon', label: 'Theme: Dark', type: 'Action', run: () => setTheme('dark') },
         { group: 'Actions', icon: 'i-monitor', label: 'Theme: System', type: 'Action', run: () => setTheme('system') },
-        { group: 'Actions', icon: 'i-download', label: 'Export contacts (CSV)', type: 'Action', run: () => { showView('contacts'); exportContacts(); } },
+        { group: 'Actions', icon: 'i-download', label: 'Export contacts (Excel)', type: 'Action', run: () => { showView('contacts'); exportContacts(); } },
         { group: 'Actions', icon: 'i-x', label: 'Clear file queue', type: 'Action', run: () => { showView('extract'); clearQueue(); } },
         { group: 'Actions', icon: 'i-chevrons-left', label: 'Toggle sidebar', type: 'Action', run: () => toggleSidebar() },
         { group: 'Actions', icon: 'i-upload', label: 'Start new extraction', type: 'Action', run: () => showView('extract') },
@@ -2345,7 +2406,7 @@ const _paletteSearchContacts = debounce(async (q) => {
             palette.contactResults = rows.map(c => ({
                 group: 'Contacts', icon: 'i-users', type: 'Contact',
                 label: `${c.name || '(no name)'} — ${contactEmail(c) || 'no email'}`,
-                run: () => viewContactProfile(c.id, c),
+                run: () => viewContactProfile(c.id),
             }));
         } catch (e) { palette.contactResults = []; }
         paletteRender();
@@ -2437,6 +2498,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Theme (boot script already set attributes; applyTheme syncs UI + events)
     let savedMode = 'system';
+    try { localStorage.removeItem('crm-settings-local'); } catch (e) { /* ignore */ }
     try { savedMode = localStorage.getItem('crm-theme-mode') || localStorage.getItem('crm-theme') || 'system'; } catch (e) { /* ignore */ }
     applyTheme(savedMode);
     if (window.matchMedia) {
@@ -2548,7 +2610,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $$('[data-close-drawer]').forEach(el => el.addEventListener('click', closeDrawer));
 
     // Settings: unsaved-changes indicator
-    ['crmDir', 'emlDir', 'watchInterval', 'watchEnabled'].forEach(id => {
+    ['crmDir', 'emlDir', 'watchInterval', 'watchEnabled', 'extractionMode', 'importPolicy'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('change', () => markSettingsDirty(true));
     });

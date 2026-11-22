@@ -382,7 +382,7 @@
               </div>
             </div>
             <button type="button" class="btn btn-secondary" onclick="exportContacts()">
-              <svg class="icon"><use href="#i-download"/></svg>Export
+              <svg class="icon"><use href="#i-download"/></svg>Export Excel
             </button>
           </div>
           <div class="banner error" id="contactsBanner" hidden></div>
@@ -704,8 +704,21 @@
                   <label for="watchInterval">Watch interval (seconds)</label>
                   <input type="number" id="watchInterval" class="num" min="10" step="5" value="30">
                 </div>
+                <label class="field">Extraction mode
+                  <select id="extractionMode" class="select">
+                    <option value="local_only">Local only</option>
+                    <option value="ai_enrichment">Use configured AI providers</option>
+                  </select>
+                </label>
+                <label class="field">Import policy
+                  <select id="importPolicy" class="select">
+                    <option value="review_first">Review first</option>
+                    <option value="always_stage">Always stage</option>
+                    <option value="smart_import">Automatically approve safe contacts</option>
+                  </select>
+                </label>
                 <label class="switch">
-                  <input type="checkbox" id="watchEnabled" checked>
+                  <input type="checkbox" id="watchEnabled">
                   <span class="switch-track" aria-hidden="true"></span>
                   <span class="switch-label">Enable folder watching</span>
                 </label>

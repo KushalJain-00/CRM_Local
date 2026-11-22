@@ -45,7 +45,6 @@ required_ids = [
     "extractBtn", "progress", "progressFill", "progressText", "extractResults",
     "contactSearch", "contactFilter", "contactsTable", "contactsBody", "contactsPagination",
     "emailSearch", "emailsTable", "emailsBody", "emailsPagination", "profilesList",
-    "chart-geo", "chart-completeness", "chart-reachability", "chart-sources",
     "quality-invalid-emails", "quality-invalid-phones", "quality-missing", "quality-dupes",
     "historyTable", "historyBody", "providerChain", "crmDir", "emlDir", "themeSelect",
     "watchInterval", "watchEnabled", "stagedContactsBody", "stagedPagination",

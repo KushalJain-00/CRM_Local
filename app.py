@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -24,7 +25,7 @@ import config
 import db
 import pipeline
 
-from api import system, settings, intake as api_intake, jobs, staged, contacts, emails, quality, history
+from api import system, settings, intake as api_intake, jobs, staged, contacts, emails, quality, history, companies
 
 BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 STATIC = BASE / "static"
@@ -39,13 +40,23 @@ _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Never delete -wal/-shm: they may hold the last committed transactions
     # after a crash. SQLite recovers them automatically on first open.
-    db.init()
+    app.state.database_ready = db.init()
     config.lock_down()
-    if config.load().get("watch"):
+    if app.state.database_ready and config.load().get("watch"):
         pipeline.start_watch()
-    yield
+    try:
+        yield
+    finally:
+        pipeline.stop_watch()
 
 app = FastAPI(title="CRM Local", openapi_url=None, lifespan=_lifespan)  # type: ignore
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_request(_request, error):
+    # Validation diagnostics can contain entire submitted credential objects.
+    detail = [{key: item[key] for key in ("loc", "type", "msg")} for item in error.errors()]
+    return JSONResponse({"detail": detail}, status_code=422)
 
 def _allowed_origins(host_header: str) -> set[str]:
     port = urlsplit("//" + host_header).port if host_header else None
@@ -65,6 +76,11 @@ async def security_headers(request, call_next):
     host = request.headers.get("host")
     if host is not None and (urlsplit("//" + host).hostname or "") not in _LOOPBACK_HOSTS:
         return JSONResponse({"detail": "host not allowed"}, status_code=403)
+    if request.url.path.startswith("/api/") and not getattr(request.app.state, "database_ready", True):
+        return JSONResponse(
+            {"detail": "The CRM database needs an explicit upgrade. Back it up and follow docs/MIGRATION.md."},
+            status_code=503,
+        )
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -112,6 +128,7 @@ app.include_router(settings.router, prefix="/api", tags=["settings"])
 app.include_router(api_intake.router, prefix="/api", tags=["intake"])
 app.include_router(jobs.router, prefix="/api", tags=["jobs"])
 app.include_router(contacts.router, prefix="/api", tags=["contacts"])
+app.include_router(companies.router, prefix="/api", tags=["companies"])
 app.include_router(emails.router, prefix="/api", tags=["emails"])
 app.include_router(quality.router, prefix="/api", tags=["quality"])
 app.include_router(history.router, prefix="/api", tags=["history"])
@@ -160,7 +177,22 @@ def main() -> None:
     if getattr(sys, "frozen", False):
         import threading
         import webbrowser
-        threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
+        import socket
+        import time
+
+        def open_when_listening():
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                try:
+                    with socket.create_connection((host, port), timeout=0.5):
+                        pass
+                except OSError:
+                    time.sleep(0.2)
+                    continue
+                webbrowser.open(f"http://{host}:{port}")
+                return
+
+        threading.Thread(target=open_when_listening, daemon=True).start()
     else:
         print(f"\n  CRM Local — http://127.0.0.1:{port}\n")
     uvicorn.run(app, host=host, port=port, log_level="warning")

@@ -94,7 +94,7 @@ RELIABILITY_DESCRIPTIONS = {
 }
 
 
-def parse_json(raw: str) -> dict | None:
+def parse_json(raw: str, *, normalize: bool = True) -> dict | None:
     if not raw:
         return None
     text = re.sub(r"```(?:json)?", "", raw).replace("```", "").strip()
@@ -108,10 +108,12 @@ def parse_json(raw: str) -> dict | None:
             data = json.loads(m.group(0))
         except json.JSONDecodeError:
             return None
-    if isinstance(data, list):
+    if isinstance(data, list) and normalize:
         data = data[0] if data else None
     if not isinstance(data, dict):
         return None
+    if not normalize:
+        return data
     # M5: validate field lengths and formats
     field_limits = {
         "name": 100, "email": 254, "phone_primary": 30, "phone_secondary": 100,
@@ -242,7 +244,7 @@ async def _one_attempt(entry: dict, system: str, prompt: str, timeout: float) ->
 
 
 async def _run_entry(entry: dict, system: str, prompt: str, rel: dict,
-                     deadline: float) -> tuple[dict | None, str]:
+                     deadline: float, validate_output=None) -> tuple[dict | None, str]:
     """Run one chain entry with bounded retries. Returns (fields, fail_reason)."""
     label = entry_label(entry)
     attempts = max(1, int(rel.get("attempts", 3)))
@@ -260,8 +262,8 @@ async def _run_entry(entry: dict, system: str, prompt: str, rel: dict,
                 await asyncio.sleep(_sleep_for(err, attempt, rel))
                 continue
             return None, f"{label}: {err.message} (after {attempts} attempts)"
-        plain = parse_json(raw)
-        if plain is not None:
+        plain = parse_json(raw, normalize=validate_output is None)
+        if plain is not None and (validate_output is None or validate_output(plain)):
             return plain, ""
         # Invalid JSON: one controlled repair attempt with explicit feedback.
         for repair in range(max(1, int(rel.get("repair_attempts", 1)))):
@@ -277,15 +279,15 @@ async def _run_entry(entry: dict, system: str, prompt: str, rel: dict,
                 if err.category == "permanent":
                     break
                 continue  # transient repair failure: try the repair once more
-            fixed = parse_json(raw2)
-            if fixed is not None:
+            fixed = parse_json(raw2, normalize=validate_output is None)
+            if fixed is not None and (validate_output is None or validate_output(fixed)):
                 return fixed, ""
         return None, f"{label}: invalid or unusable JSON (repair attempted)"
     return None, f"{label}: exhausted retries"
 
 
 async def extract(chain: list, prompt: str, *, system: str | None = None,
-                  reliability: dict | None = None) -> tuple[dict | None, str]:
+                  reliability: dict | None = None, validate_output=None) -> tuple[dict | None, str]:
     """Try each enabled entry in order. Returns (fields, provider_label_or_error)."""
     global LAST_RUN
     LAST_RUN = []
@@ -306,7 +308,15 @@ async def extract(chain: list, prompt: str, *, system: str | None = None,
             LAST_RUN.append(rec)
             continue
         try:
-            fields, reason = await _run_entry(entry, system, prompt, rel, deadline)
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return None, "total extraction deadline exceeded"
+            fields, reason = await asyncio.wait_for(
+                _run_entry(entry, system, prompt, rel, deadline, validate_output),
+                timeout=remaining,
+            )
+        except TimeoutError:
+            return None, f"{label}: total extraction deadline exceeded"
         except Exception as exc:  # one broken entry must never stop the chain
             reason = f"{label}: {_redact(str(exc), entry)}"
             fields = None
