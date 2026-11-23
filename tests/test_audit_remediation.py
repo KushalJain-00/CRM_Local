@@ -172,3 +172,33 @@ def test_approval_creates_new_contact_when_previous_match_was_deleted(data_dir):
             if len(ids) == 1:
                 assert client.delete(f'/api/contacts/{recent["id"]}').status_code == 200
         assert ids[0] != ids[1]
+
+
+def test_labelled_eml_populates_screenshot_fields_in_staging(data_dir):
+    message = (
+        b"From: Alex Example <alex@example.com>\r\n"
+        b"To: review@example.com\r\nCc: team@example.com\r\nBcc: archive@example.com\r\n"
+        b"Subject: Contact details\r\n\r\nRegards,\r\n"
+        b"Name: Alex Example\r\nEmail: shared@example.com\r\n"
+        b"Company: Example Studio\r\nRole: Principal Architect\r\n"
+        b"Phone: +1 (212) 555-0123\r\nAlternate phone: +1 (212) 555-0144\r\n"
+        b"Address: 10 Example Lane\r\nCity: Mississauga\r\nPostal code: L5B 1M9\r\n"
+        b"Website: https://example.com/about\r\n"
+    )
+    with TestClient(app) as client:
+        result = client.post("/api/intake", files={"files": ("labelled.eml", message)}).json()
+        assert result["results"][0]["status"] == "OK"
+        row = client.get("/api/staged-contacts").json()["rows"][0]
+        assert {key: row[key] for key in (
+            "name", "email", "company", "designation", "phone_primary", "phone_secondary",
+            "address", "city", "pincode", "website", "source_file", "to_emails", "cc_emails", "bcc_emails",
+        )} == {
+            "name": "Alex Example", "email": "alex@example.com", "company": "Example Studio",
+            "designation": "Principal Architect", "phone_primary": "+1 (212) 555-0123",
+            "phone_secondary": "+1 (212) 555-0144", "address": "10 Example Lane",
+            "city": "Mississauga", "pincode": "L5B 1M9", "website": "https://example.com/about",
+            "source_file": "labelled.eml", "to_emails": "review@example.com",
+            "cc_emails": "team@example.com", "bcc_emails": "archive@example.com",
+        }
+        assert row["id"] and row["source_email_id"] and row["created_at"]
+        assert row["dedup_status"] and not row["pushed_to_crm"]

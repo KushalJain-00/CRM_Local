@@ -22,9 +22,10 @@ from services.adapters import (
     get_adapter, eml_to_normalized, NormalizedContact,
 )
 from services.eml_processor import (
-    FIELD_KEYS, extract_local_fields, merge_fields, build_llm_prompt,
+    FIELD_KEYS, merge_fields, build_llm_prompt,
 )
 from services.prompts import store as prompt_store
+from services.eml_fields import extract_contact_fields
 from services.ai_assist import assist_document
 from services.limits import MAX_FILE_SIZE
 
@@ -85,7 +86,8 @@ def _enrich_documents(contacts, candidates, name):
                 contact.field_origin = {**(contact.field_origin or {}), key: "ai"}
                 evidence = candidate["field_evidence"].get(key)
                 if evidence:
-                    contact.field_evidence = {**(contact.field_evidence or {}), key: evidence}
+                    contact.field_evidence = {
+                        **evidence,**(contact.field_evidence or {}), key: evidence}
             index(contact)
         else:
             contact = NormalizedContact(source_file=name, **candidate)
@@ -167,7 +169,7 @@ async def process_source(con, path: str, *, chain: list | None = None,
                     chain, prompt, system=prompt_store.text("eml"),
                     reliability=cfg.get("reliability"), validate_output=valid)
                 if ai and valid(ai):
-                    local = extract_local_fields(parsed)
+                    local, evidence, _ = extract_contact_fields(parsed)
                     merged = merge_fields(local, ai)
                     added = {key: value for key, value in ai.items() if value and not local.get(key)}
                     contact = eml_to_normalized(merged, added, source_file=name)
@@ -176,6 +178,7 @@ async def process_source(con, path: str, *, chain: list | None = None,
                         {"excerpt": value, "location": "email", "confidence": "low"}
                         for key, value in added.items()
                     }
+                    contact.field_evidence.update(evidence)
                     contacts = [contact]
                 else:
                     warnings.append(f"LLM skipped ({label}) — local fields only")
